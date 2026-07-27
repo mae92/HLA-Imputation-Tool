@@ -101,7 +101,7 @@
 
                     <!-- Iterative Approach? -->
                     <StackPanel Grid.Row="3">
-                        <TextBlock Text="View Options" FontWeight="SemiBold"/>
+                        <TextBlock Text="Iterate" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,0,0,5">
                             <CheckBox x:Name="cbUseIterativeApproach" Content="Use Iterative Approach" Margin="0,0,12,0"/>
                         </WrapPanel>
