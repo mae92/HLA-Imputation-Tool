@@ -38,6 +38,9 @@ namespace HLAImputation.Models
         public int Mismatch { get; set; }
         public string Selection { get; set; }
 
+        public string RaceStrategyUsed { get; set; } = "";
+        public string FailureReason { get; set; } = "";
+
         // ✅ existing
         public bool Success { get; set; }
     }

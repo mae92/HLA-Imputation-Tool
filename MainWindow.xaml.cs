@@ -370,8 +370,8 @@ namespace HLAImputation
                     token.ThrowIfCancellationRequested();
 
                     // Compute per-sample iterative (or non-iterative) result
-                    var (res, transformedInput, usedMap) =
-                        ImputeOneWithOptionalIterativeFallback(rawInput, resolutionMode, convertToGGroup, baseUseLocus, iterativeEnabled);
+                    var (res, transformedInput, usedMap, failureReason, raceStrategyUsed) =
+    ImputeOneWithOptionalIterativeFallback(rawInput, resolutionMode, convertToGGroup, baseUseLocus, iterativeEnabled);
 
                     done++;
                     bool success = res != null;
@@ -412,6 +412,10 @@ namespace HLAImputation
                         FreqDip = success ? res.FreqDip : 0,
                         Mismatch = success ? res.MismatchCount : 0,
                         Selection = success ? res.FinalSelection : "FAILED",
+
+                        RaceStrategyUsed = success ? (res.RaceStrategyUsed ?? raceStrategyUsed) : raceStrategyUsed,
+                        FailureReason = success ? "" : failureReason,
+
                         Success = success
                     };
 
@@ -521,7 +525,7 @@ namespace HLAImputation
             if (tbTopHaps != null && int.TryParse(tbTopHaps.Text.Trim(), out int topN) && topN > 0)
                 _engine.MaxHaplotypes = topN;
             else
-                _engine.MaxHaplotypes = 1000;
+                _engine.MaxHaplotypes = 1000000;
 
             _engine.UseLocus["A"] = cbA.IsChecked == true;
             _engine.UseLocus["B"] = cbB.IsChecked == true;
@@ -627,7 +631,11 @@ namespace HLAImputation
 
         // Run ProcessSingle with a temporary UseLocus override.
         // This is necessary because ImputationEngine uses its internal UseLocus during stepwise filtering.
-        private DiplotypeResult? ProcessSingleWithUseLocusOverride(InputRecord transformedInput, Dictionary<string, bool> attemptUseMap)
+        private DiplotypeResult? ProcessSingleWithUseLocusOverride(
+    InputRecord transformedInput,
+    Dictionary<string, bool> attemptUseMap,
+    out string failureReason,
+    out string raceStrategyUsed)
         {
             lock (_engineLock)
             {
@@ -635,7 +643,7 @@ namespace HLAImputation
                 try
                 {
                     _engine.UseLocus = new Dictionary<string, bool>(attemptUseMap, StringComparer.OrdinalIgnoreCase);
-                    return _engine.ProcessSingle(transformedInput);
+                    return _engine.ProcessSingle(transformedInput, out failureReason, out raceStrategyUsed);
                 }
                 finally
                 {
@@ -645,67 +653,64 @@ namespace HLAImputation
         }
 
         // One sample: either run once (non-iterative) or iteratively drop loci from the END of SearchOrder until success.
-        private (DiplotypeResult? Result, InputRecord TransformedInput, Dictionary<string, bool> UsedMap)
-            ImputeOneWithOptionalIterativeFallback(
-                InputRecord rawInput,
-                string resolutionMode,
-                bool convertToGGroup,
-                Dictionary<string, bool> baseUseLocus,
-                bool iterativeEnabled)
+        private (DiplotypeResult? Result,
+         InputRecord TransformedInput,
+         Dictionary<string, bool> UsedMap,
+         string FailureReason,
+         string RaceStrategyUsed)
+    ImputeOneWithOptionalIterativeFallback(
+        InputRecord rawInput,
+        string resolutionMode,
+        bool convertToGGroup,
+        Dictionary<string, bool> baseUseLocus,
+        bool iterativeEnabled)
         {
-            // Start with all loci that are enabled in UI AND have any data
             var currentUse = BuildPerSampleUseLocusMap(rawInput, baseUseLocus);
-
-            // Always compute at least one transformed input (used for QC display alignment)
             InputRecord transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
 
-            // If iterative off: just try once
+            string failureReason;
+            string raceStrategyUsed;
+
             if (!iterativeEnabled)
             {
-                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse);
-                return (resOnce, transformed, currentUse);
+                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+                return (resOnce, transformed, currentUse, failureReason, raceStrategyUsed);
             }
 
-            // Iterative ON: try with all available loci first
-            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse);
+            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
             if (res != null)
-                return (res, transformed, currentUse);
+                return (res, transformed, currentUse, failureReason, raceStrategyUsed);
 
+            string lastFailureReason = failureReason;
+            string lastRaceStrategy = raceStrategyUsed;
 
-            // Iterative fallback policy:
-            // remove loci from the end of SearchOrder, but never remove the top 3 ranked loci.
-
-            // If fail: remove loci from END of SearchOrder (e.g., #9 then #8 then ...)
-            // BUT STOP once only search-order positions #1, #2, and #3 remain.
-            // With 0-based indexing, that means we may remove indices 8..3, but NEVER 2, 1, or 0.
             var order = _engine.SearchOrder.ToList();
-
-            // Keep the first 3 ranked loci no matter what
             const int MIN_SEARCH_ORDER_POSITIONS_TO_KEEP = 3;
 
-            // Start from the end and only drop loci whose position is >= 4 in 1-based terms
-            // (i.e., idx >= 3 in 0-based indexing)
             for (int idx = order.Count - 1; idx >= MIN_SEARCH_ORDER_POSITIONS_TO_KEEP; idx--)
             {
                 string locusToDrop = order[idx];
 
-                // Only drop if this locus is currently active for this sample
                 if (currentUse.TryGetValue(locusToDrop, out bool on) && on)
                 {
                     currentUse[locusToDrop] = false;
-
                     transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
-                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse);
+
+                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+
+                    lastFailureReason = failureReason;
+                    lastRaceStrategy = raceStrategyUsed;
 
                     if (res != null)
-                        return (res, transformed, currentUse);
+                        return (res, transformed, currentUse, failureReason, raceStrategyUsed);
                 }
             }
 
-            // Still failed after dropping everything allowed.
-            // At this point, the top 3 search-order loci are still preserved.
-            return (null, transformed, currentUse);
+            string summary =
+                (string.IsNullOrWhiteSpace(lastFailureReason) ? "Imputation failed." : lastFailureReason)
+                + " Iterative fallback removed loci down to the top 3 search-order positions without success.";
 
+            return (null, transformed, currentUse, summary, lastRaceStrategy);
         }
 
         // Snapshot settings used for the run (written into Export "Run Settings" tab)
