@@ -11,7 +11,7 @@ namespace HLAImputation.Services
         private readonly ReferenceStore _store;
 
         // Settings driven by GUI
-        public int MaxHaplotypes { get; set; } = 1000;
+        public int MaxHaplotypes { get; set; } = 1000000;
         public bool MustMatchInput { get; set; } = true;
 
         // Input conversion mode: "Raw", "TwoField", "OneField"
@@ -40,33 +40,52 @@ namespace HLAImputation.Services
             _store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
-        public DiplotypeResult? ProcessSingle(InputRecord input)
+        public DiplotypeResult? ProcessSingle(
+    InputRecord input,
+    out string failureReason,
+    out string raceStrategyUsed)
         {
-            // 0) Make a transformed copy of the input that will be used in imputation
+            failureReason = "";
+            raceStrategyUsed = "";
+
             var transformed = TransformInputForImputation(input);
 
-            // 1) Stepwise haplotype filtering in the requested order (matches R approach) [1](https://upmchs-my.sharepoint.com/personal/ellisoniima_upmc_edu/_layouts/15/Doc.aspx?sourcedoc=%7B321304C1-EB93-4927-9379-E5184A9B5802%7D&file=Imputation%20Pipeline%20Description%2002062026.docx&action=default&mobileredirect=true&DefaultItemOpen=1)
+            string raceSourceUsed;
             var candidates = _store.QueryTopHaplotypesStepwise(
                 transformed,
                 orderedLoci: SearchOrder,
                 useLocus: UseLocus,
                 topN: MaxHaplotypes,
                 ifNoRaceUse: IfNoRaceListedUse,
-                ifNoHapsUse: IfNoHapsForRaceUse
+                ifNoHapsUse: IfNoHapsForRaceUse,
+                raceSourceUsed: out raceSourceUsed
             );
 
-            if (candidates.Count < 2)
-                return null;
+            raceStrategyUsed = raceSourceUsed;
 
-            // 2) Sort by freq desc and choose best diplotype under constraints
+            if (candidates == null || candidates.Count < 2)
+            {
+                int foundCount = candidates?.Count ?? 0;
+                failureReason = foundCount == 0
+                    ? "No candidate haplotypes were found for this sample under the current loci/settings."
+                    : "Only one candidate haplotype was found; at least two are required to form a diplotype.";
+                return null;
+            }
+
             candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
 
             var best = FindBestDiplotypePruned(transformed, candidates);
-
             if (best == null)
+            {
+                failureReason = MustMatchInput
+                    ? "No diplotype fully matched the input at the one-field level (Must Match Input / strict mode)."
+                    : "No acceptable diplotype could be formed from the candidate haplotypes.";
                 return null;
+            }
 
             best.FinalSelection = "highest frequency";
+            best.RaceStrategyUsed = raceStrategyUsed;
+            best.FailureReason = "";
             return best;
         }
 

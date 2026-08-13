@@ -37,6 +37,11 @@ namespace HLAImputation.Models
 
         public int NumberInputAlleles { get; set; }
         public int MismatchCount { get; set; }
+
+        public string RaceStrategyUsed { get; set; } = "";
+        public string FailureReason { get; set; } = "";
+
+
         public string FinalSelection { get; set; } = "";
     }
 }

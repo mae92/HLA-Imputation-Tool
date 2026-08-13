@@ -284,25 +284,46 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
 
 
         public List<Haplotype> QueryTopHaplotypesStepwise(
-            InputRecord input,
-            List<string> orderedLoci,
-            Dictionary<string, bool> useLocus,
-            int topN,
-            string ifNoRaceUse = "FiveRaceAverage",
-            string ifNoHapsUse = "HighestOfAnyRace")
+    InputRecord input,
+    List<string> orderedLoci,
+    Dictionary<string, bool> useLocus,
+    int topN,
+    string ifNoRaceUse,
+    string ifNoHapsUse,
+    out string raceSourceUsed)
         {
-            // Determine frequency column to use
-            string raceCol = !string.IsNullOrWhiteSpace(input.Race)
+            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+
+            // Primary column: race column if provided, else FiveRaceAverage (via ifNoRaceUse)
+            string primaryCol = hasRace
                 ? input.Race.Trim().ToUpperInvariant()
                 : ifNoRaceUse;
 
-            // Attempt with raceCol first, then fallback if empty
-            var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, raceCol);
-            if (haps.Count > 0) return haps;
+            var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, primaryCol);
 
-            if (!raceCol.Equals(ifNoHapsUse, StringComparison.OrdinalIgnoreCase))
-                return QueryStepwiseInternal(input, orderedLoci, useLocus, topN, ifNoHapsUse);
+            if (haps.Count > 0)
+            {
+                raceSourceUsed = hasRace
+                    ? "Race-specific (" + primaryCol + ")"
+                    : "Five-race average (no race listed)";
+                return haps;
+            }
 
+            // Fallback (only if different column)
+            if (!primaryCol.Equals(ifNoHapsUse, StringComparison.OrdinalIgnoreCase))
+            {
+                var fallback = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, ifNoHapsUse);
+
+                if (fallback.Count > 0)
+                {
+                    raceSourceUsed = hasRace
+                        ? "Highest of any race (no haplotypes for listed race)"
+                        : "Highest of any race (no haplotypes for five-race average)";
+                    return fallback;
+                }
+            }
+
+            raceSourceUsed = "No haplotypes found (any strategy)";
             return haps;
         }
 
