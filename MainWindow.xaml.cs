@@ -413,8 +413,15 @@ namespace HLAImputation
                         Mismatch = success ? res.MismatchCount : 0,
                         Selection = success ? res.FinalSelection : "FAILED",
 
-                        RaceStrategyUsed = success ? (res.RaceStrategyUsed ?? raceStrategyUsed) : raceStrategyUsed,
-                        FailureReason = success ? "" : failureReason,
+                        RaceStrategyUsed = success
+                            ? (res.RaceStrategyUsed ?? raceStrategyUsed)
+                            : (string.IsNullOrWhiteSpace(raceStrategyUsed) ? "Unknown" : raceStrategyUsed),
+
+                        FailureReason = success
+                            ? ""
+                            : (string.IsNullOrWhiteSpace(failureReason)
+                                ? "Imputation failed (no specific reason was reported)."
+                                : failureReason),
 
                         Success = success
                     };

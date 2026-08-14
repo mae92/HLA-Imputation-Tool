@@ -40,6 +40,10 @@ namespace HLAImputation.Services
             _store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
+        // Race Handling Strategy:
+            // Race provided: CAU → FiveRaceAverage → HighestOfAnyRace ✅
+            // No race: FiveRaceAverage → HighestOfAnyRace ✅
+
         public DiplotypeResult? ProcessSingle(
     InputRecord input,
     out string failureReason,
@@ -49,44 +53,68 @@ namespace HLAImputation.Services
             raceStrategyUsed = "";
 
             var transformed = TransformInputForImputation(input);
+            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
 
-            string raceSourceUsed;
-            var candidates = _store.QueryTopHaplotypesStepwise(
-                transformed,
-                orderedLoci: SearchOrder,
-                useLocus: UseLocus,
-                topN: MaxHaplotypes,
-                ifNoRaceUse: IfNoRaceListedUse,
-                ifNoHapsUse: IfNoHapsForRaceUse,
-                raceSourceUsed: out raceSourceUsed
-            );
+            // Build the ordered strategy chain
+            // Race provided:  RACE -> FiveRaceAverage -> HighestOfAnyRace
+            // No race:        FiveRaceAverage -> HighestOfAnyRace
+            var attempts = new List<(string Column, string Label)>();
 
-            raceStrategyUsed = raceSourceUsed;
-
-            if (candidates == null || candidates.Count < 2)
+            if (hasRace)
             {
-                int foundCount = candidates?.Count ?? 0;
-                failureReason = foundCount == 0
-                    ? "No candidate haplotypes were found for this sample under the current loci/settings."
-                    : "Only one candidate haplotype was found; at least two are required to form a diplotype.";
-                return null;
+                string raceCol = input.Race.Trim().ToUpperInvariant();
+                attempts.Add((raceCol, "Race-specific (" + raceCol + ")"));
+                attempts.Add(("FiveRaceAverage", "Five-race average (fallback after race)"));
+                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+            }
+            else
+            {
+                attempts.Add(("FiveRaceAverage", "Five-race average (no race listed)"));
+                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
             }
 
-            candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
+            string lastFailureReason = "Imputation failed.";
 
-            var best = FindBestDiplotypePruned(transformed, candidates);
-            if (best == null)
+            foreach (var attempt in attempts)
             {
-                failureReason = MustMatchInput
-                    ? "No diplotype fully matched the input at the one-field level (Must Match Input / strict mode)."
-                    : "No acceptable diplotype could be formed from the candidate haplotypes.";
-                return null;
+                raceStrategyUsed = attempt.Label;
+
+                var candidates = _store.QueryTopHaplotypesForColumn(
+                    transformed,
+                    orderedLoci: SearchOrder,
+                    useLocus: UseLocus,
+                    topN: MaxHaplotypes,
+                    freqCol: attempt.Column
+                );
+
+                if (candidates == null || candidates.Count < 2)
+                {
+                    lastFailureReason = (candidates?.Count ?? 0) == 0
+                        ? "No candidate haplotypes were found using " + attempt.Column + "."
+                        : "Only one candidate haplotype was found using " + attempt.Column + "; at least two are required.";
+                    continue; // try next tier
+                }
+
+                candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
+                var best = FindBestDiplotypePruned(transformed, candidates);
+
+                if (best != null)
+                {
+                    best.FinalSelection = "highest frequency";
+                    best.RaceStrategyUsed = raceStrategyUsed;
+                    best.FailureReason = "";
+                    return best;
+                }
+
+                lastFailureReason = MustMatchInput
+                    ? "No diplotype fully matched the input at the one-field level using " + attempt.Column + " (Must Match Input / strict mode)."
+                    : "No acceptable diplotype could be formed using " + attempt.Column + ".";
+                // try next tier
             }
 
-            best.FinalSelection = "highest frequency";
-            best.RaceStrategyUsed = raceStrategyUsed;
-            best.FailureReason = "";
-            return best;
+            // All tiers failed
+            failureReason = lastFailureReason;
+            return null;
         }
 
         private InputRecord TransformInputForImputation(InputRecord input)

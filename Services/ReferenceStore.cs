@@ -327,6 +327,20 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
             return haps;
         }
 
+
+        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyRace").
+        // Used by the engine to retry when diplotype selection fails on the race-specific set.
+        public List<Haplotype> QueryTopHaplotypesForColumn(
+            InputRecord input,
+            List<string> orderedLoci,
+            Dictionary<string, bool> useLocus,
+            int topN,
+            string freqCol)
+        {
+            return QueryStepwiseInternal(input, orderedLoci, useLocus, topN, freqCol);
+        }
+
+
         private List<Haplotype> QueryStepwiseInternal(
             InputRecord input,
             List<string> orderedLoci,
