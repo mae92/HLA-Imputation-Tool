@@ -41,7 +41,7 @@ namespace HLAImputation.Models
         public string RaceStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
-
+        public bool IsSingleHaplotypeImputation { get; set; }
         public string FinalSelection { get; set; } = "";
     }
 }

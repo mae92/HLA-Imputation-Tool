@@ -87,22 +87,29 @@ namespace HLAImputation.Services
                     freqCol: attempt.Column
                 );
 
-                if (candidates == null || candidates.Count < 2)
+                if (candidates == null || candidates.Count == 0)
                 {
-                    lastFailureReason = (candidates?.Count ?? 0) == 0
-                        ? "No candidate haplotypes were found using " + attempt.Column + "."
-                        : "Only one candidate haplotype was found using " + attempt.Column + "; at least two are required.";
+                    lastFailureReason =
+                        "No candidate haplotypes were found using " + attempt.Column + ".";
+
                     continue; // try next tier
                 }
 
                 candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
+
+                bool singleHaplotypeCandidate = candidates.Count == 1;
+
                 var best = FindBestDiplotypePruned(transformed, candidates);
 
                 if (best != null)
                 {
-                    best.FinalSelection = "highest frequency";
+                    best.FinalSelection =
+                        singleHaplotypeCandidate
+                            ? "single haplotype homozygous imputation"
+                            : "highest frequency";
                     best.RaceStrategyUsed = raceStrategyUsed;
                     best.FailureReason = "";
+                    best.IsSingleHaplotypeImputation = singleHaplotypeCandidate;
                     return best;
                 }
 
