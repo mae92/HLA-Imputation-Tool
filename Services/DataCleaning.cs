@@ -97,8 +97,81 @@ namespace HLAImputation.Services
                 copy.Loci[locus] = new[] { t1, t2 };
             }
 
+            ApplyDrb345NullCorrections(copy);
+
             return copy;
         }
+
+        private static bool IsHomozygousDrb345(
+            string allele1,
+            string allele2)
+        {
+            allele1 = allele1?.Trim() ?? "";
+            allele2 = allele2?.Trim() ?? "";
+
+            if (string.IsNullOrWhiteSpace(allele1) &&
+                string.IsNullOrWhiteSpace(allele2))
+            {
+                return true;
+            }
+
+            return string.Equals(
+                allele1,
+                allele2,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsNullAssociatedDrb1(
+            string allele)
+        {
+            if (string.IsNullOrWhiteSpace(allele))
+                return false;
+
+            allele = allele.Trim().ToUpperInvariant();
+
+            return allele.StartsWith("DRB1*01") ||
+                   allele.StartsWith("DRB1*08") ||
+                   allele.StartsWith("DRB1*10");
+        }
+
+        private void ApplyDrb345NullCorrections(
+            InputRecord record)
+        {
+            if (!record.Loci.ContainsKey("DRB1"))
+                return;
+
+            if (!record.Loci.ContainsKey("DRB345"))
+                return;
+
+            string drb1a = record.Loci["DRB1"][0] ?? "";
+            string drb1b = record.Loci["DRB1"][1] ?? "";
+
+            string drb345a = record.Loci["DRB345"][0] ?? "";
+            string drb345b = record.Loci["DRB345"][1] ?? "";
+
+            //
+            // ONLY inspect homozygous DRB345 samples
+            //
+            if (!IsHomozygousDrb345(drb345a, drb345b))
+                return;
+
+            //
+            // Apply mapping from DRB1
+            //
+            if (IsNullAssociatedDrb1(drb1a))
+                drb345a = "DRBX*NNNN";
+
+            if (IsNullAssociatedDrb1(drb1b))
+                drb345b = "DRBX*NNNN";
+
+            record.Loci["DRB345"] = new[]
+            {
+        drb345a,
+        drb345b
+    };
+        }
+
+
 
         private string NormalizeDRB345Allele(string allele)
         {
