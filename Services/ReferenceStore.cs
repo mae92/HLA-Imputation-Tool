@@ -341,6 +341,60 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
         }
 
 
+        // ===========================================================
+        // ✅ NEW: Build Class II null-DRB345 reference from the panel
+        // ===========================================================
+        public ClassIINullDrb345Reference BuildClassIINullReference()
+        {
+            var fullNull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nullCapable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var expressedCapable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using var conn = new SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT DISTINCT drb1, drb345, dqa1, dqb1 FROM Haplotypes;";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string drb1 = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                    string drb345 = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                    string dqa1 = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    string dqb1 = reader.IsDBNull(3) ? "" : reader.GetString(3);
+
+                    string drb1Key = ClassIINullDrb345Reference.TwoField(drb1);
+                    if (string.IsNullOrWhiteSpace(drb1Key)) continue;
+
+                    if (ClassIINullDrb345Reference.IsNullDrb345(drb345))
+                    {
+                        nullCapable.Add(drb1Key);
+                        fullNull.Add(ClassIINullDrb345Reference.BuildKey(drb1, dqa1, dqb1));
+                    }
+                    else
+                    {
+                        expressedCapable.Add(drb1Key);
+                    }
+                }
+            }
+            catch
+            {
+                // DB not ready or query failed -> empty reference (corrections are simply skipped).
+                return new ClassIINullDrb345Reference(
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            // "Always null" = a DRB1 that NEVER appears with an expressed DRB3/4/5 in the panel.
+            // This is what captures DRB1*01 / *08 / *10 automatically, with no hardcoding.
+            var alwaysNull = new HashSet<string>(nullCapable, StringComparer.OrdinalIgnoreCase);
+            alwaysNull.ExceptWith(expressedCapable);
+
+            return new ClassIINullDrb345Reference(fullNull, alwaysNull);
+        }
+
+
         private List<Haplotype> QueryStepwiseInternal(
             InputRecord input,
             List<string> orderedLoci,
@@ -515,6 +569,77 @@ LIMIT @topN;
         {
             if (line.Contains('\t')) return line.Split('\t');
             return line.Split(',');
+        }
+    }
+
+    /// <summary>
+    /// Immutable lookup used to decide whether a DRB1 allele should carry a
+    /// null (DRBX*NNNN) DRB3/4/5, based entirely on the imputation reference panel.
+    /// </summary>
+    public sealed class ClassIINullDrb345Reference
+    {
+        private readonly HashSet<string> _fullNullKeys;   // "DRB1|DQA1|DQB1" (two-field)
+        private readonly HashSet<string> _alwaysNullDrb1; // DRB1 (two-field) that is only ever null
+
+        public ClassIINullDrb345Reference(
+            HashSet<string> fullNullKeys,
+            HashSet<string> alwaysNullDrb1)
+        {
+            _fullNullKeys = fullNullKeys ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _alwaysNullDrb1 = alwaysNullDrb1 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public int Count => _fullNullKeys.Count + _alwaysNullDrb1.Count;
+
+        // Matches the app's existing DRB345 convention (blank / DRBX* / trailing 'N' => null).
+        public static bool IsNullDrb345(string drb345)
+        {
+            if (string.IsNullOrWhiteSpace(drb345)) return true;
+            drb345 = drb345.Trim();
+            if (drb345.StartsWith("DRBX", StringComparison.OrdinalIgnoreCase)) return true;
+            if (drb345.EndsWith("N", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        public static string TwoField(string allele)
+        {
+            if (string.IsNullOrWhiteSpace(allele)) return "";
+            return AlleleUtils.ToTwoField(
+                AlleleUtils.NormalizeLeadingZeros(allele.Trim()));
+        }
+
+        public static string BuildKey(string drb1, string dqa1, string dqb1)
+            => $"{TwoField(drb1)}|{TwoField(dqa1)}|{TwoField(dqb1)}";
+
+        /// <summary>
+        /// True if this DRB1 allele forms a known null (DRBX*NNNN) Class II haplotype.
+        /// Uses available DQ data; falls back to "always-null DRB1" when DQ is missing.
+        /// </summary>
+        public bool IsDrb1NullAssociated(
+            string drb1,
+            string dqa1a, string dqa1b,
+            string dqb1a, string dqb1b)
+        {
+            string d = TwoField(drb1);
+            if (string.IsNullOrWhiteSpace(d)) return false;
+
+            // Strongest evidence: DRB1 that is null across the entire panel.
+            if (_alwaysNullDrb1.Contains(d)) return true;
+
+            // Otherwise require a full DRB1-DQA1-DQB1 null haplotype using the sample's DQ.
+            string[] dqas = { dqa1a, dqa1b };
+            string[] dqbs = { dqb1a, dqb1b };
+            foreach (var qa in dqas)
+            {
+                if (string.IsNullOrWhiteSpace(qa)) continue;
+                foreach (var qb in dqbs)
+                {
+                    if (string.IsNullOrWhiteSpace(qb)) continue;
+                    if (_fullNullKeys.Contains(BuildKey(drb1, qa, qb)))
+                        return true;
+                }
+            }
+            return false;
         }
     }
 }

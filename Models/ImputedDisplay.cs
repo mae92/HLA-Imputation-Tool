@@ -43,6 +43,9 @@ namespace HLAImputation.Models
 
         // ✅ existing
         public bool Success { get; set; }
+
+        // ✅ NEW: right-side per-sample cleaning summary (one line, " | " separated).
+        public string CleaningSummary { get; set; } = "";
     }
 }
 
