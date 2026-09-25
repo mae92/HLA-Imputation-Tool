@@ -17,6 +17,8 @@ This README separates:
 - **Executable and distribution materials:** https://zenodo.org/records/21414456
 
 ---
+<img width="1536" height="1024" alt="Overview Diagram v1" src="https://github.com/user-attachments/assets/ae805a24-09a7-4ab0-b970-6206fe2cbb5d" />
+---
 
 # Validated / Published Functionality
 
