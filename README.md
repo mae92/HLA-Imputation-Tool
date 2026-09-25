@@ -72,12 +72,7 @@ TxID	Race	PatType	A1	    A2	  B1	    B2	    C1	    C2	    DRB11	      DRB12	    
 4. Apply the applicable population-frequency strategy.
 5. Construct candidate diplotypes.
 6. Require one-field agreement at every selected input locus.
-7. Rank compatible candidates using:
-
-```text
-F_haplotype1 × F_haplotype2 = F_diplotype
-```
-
+7. Rank compatible candidates using: F_haplotype1 × F_haplotype2 = F_estimate_diplotype
 8. Export the selected genotype and QC information.
 
 The ranking score is not a calibrated probability of correctness.
