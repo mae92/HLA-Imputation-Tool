@@ -1,6 +1,7 @@
 # HLA Imputation Tool
 
-<img width="1536" height="1024" alt="Overview Diagram v1" src="https://github.com/user-attachments/assets/ae805a24-09a7-4ab0-b970-6206fe2cbb5d" />
+<img width="1672" height="941" alt="Overview Diagram v2" src="https://github.com/user-attachments/assets/6450dcf1-93e0-4d98-8b72-8d0f453dd80e" />
+
 
 HLA Imputation Tool is a locally deployable Windows application for haplotype-frequency-based imputation of extended HLA genotypes.
 
