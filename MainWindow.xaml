@@ -221,7 +221,8 @@
                       Margin="10"
                       AutoGenerateColumns="True"
                       AutoGeneratingColumn="InputGrid_AutoGeneratingColumn"
-                      MouseDoubleClick="InputGrid_DoubleClick"/>
+                      MouseDoubleClick="InputGrid_DoubleClick"
+                      CanUserAddRows="False"/>
 
             <!-- RESULT -->
             <DataGrid x:Name="ResultGrid"
@@ -229,7 +230,8 @@
                       Margin="10"
                       AutoGenerateColumns="True"
                       AutoGeneratingColumn="ResultGrid_AutoGeneratingColumn"
-                      MouseDoubleClick="ResultGrid_DoubleClick"/>
+                      MouseDoubleClick="ResultGrid_DoubleClick"
+                      CanUserAddRows="False"/>
 
             <!-- ✅ CLEAN FOOTER -->
             <Border Grid.Row="2"

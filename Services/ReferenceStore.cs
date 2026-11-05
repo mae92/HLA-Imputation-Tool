@@ -1,4 +1,6 @@
 ﻿
+using HLAImputation.Models;
+using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -6,8 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Microsoft.Data.Sqlite;
-using HLAImputation.Models;
+using System.Windows;
 
 namespace HLAImputation.Services
 {
@@ -41,13 +42,49 @@ namespace HLAImputation.Services
         /// </summary>
         public void EnsureBuilt(Action<int>? refProgressCallback = null, Action<int>? dbProgressCallback = null)
         {
-            if (IsDbValid(_dbPath))
+            bool rebuildNeeded = false;
+
+            if (!IsDbValid(_dbPath))
             {
-                Debug.WriteLine("ReferenceStore: DB already valid — skipping build.");
+                rebuildNeeded = true;
+            }
+            else
+            {
+                DateTime csvTime =
+                    File.GetLastWriteTimeUtc(_csvPath);
+
+                DateTime dbTime =
+                    File.GetLastWriteTimeUtc(_dbPath);
+
+                if (csvTime > dbTime)
+                {
+                    rebuildNeeded = true;
+
+                    Debug.WriteLine(
+                        "ReferenceStore: CSV is newer than SQLite. Rebuild required.");
+                }
+            }
+
+            if (!rebuildNeeded)
+            {
+                Debug.WriteLine(
+                    "ReferenceStore: Existing SQLite database is current.");
+
                 refProgressCallback?.Invoke(100);
                 dbProgressCallback?.Invoke(100);
+
                 return;
             }
+
+            MessageBox.Show(
+                "The reference panel has changed or the SQLite database is missing." +
+                "\n\n" +
+                "A new SQLite database will now be created." +
+                "\n\n" +
+                "This may take several minutes.",
+                "Updating Reference Database",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
 
             Debug.WriteLine("ReferenceStore: DB missing/invalid — rebuilding.");
 
@@ -284,27 +321,116 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
 
 
         public List<Haplotype> QueryTopHaplotypesStepwise(
+    InputRecord input,
+    List<string> orderedLoci,
+    Dictionary<string, bool> useLocus,
+    int topN,
+    string ifNoRaceUse,
+    string ifNoHapsUse,
+    out string raceSourceUsed)
+        {
+            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+
+            // Primary column: race column if provided, else FiveRaceAverage (via ifNoRaceUse)
+            string primaryCol = hasRace
+                ? input.Race.Trim().ToUpperInvariant()
+                : ifNoRaceUse;
+
+            var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, primaryCol);
+
+            if (haps.Count > 0)
+            {
+                raceSourceUsed = hasRace
+                    ? "Race-specific (" + primaryCol + ")"
+                    : "Five-race average (no race listed)";
+                return haps;
+            }
+
+            // Fallback (only if different column)
+            if (!primaryCol.Equals(ifNoHapsUse, StringComparison.OrdinalIgnoreCase))
+            {
+                var fallback = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, ifNoHapsUse);
+
+                if (fallback.Count > 0)
+                {
+                    raceSourceUsed = hasRace
+                        ? "Highest of any race (no haplotypes for listed race)"
+                        : "Highest of any race (no haplotypes for five-race average)";
+                    return fallback;
+                }
+            }
+
+            raceSourceUsed = "No haplotypes found (any strategy)";
+            return haps;
+        }
+
+
+        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyRace").
+        // Used by the engine to retry when diplotype selection fails on the race-specific set.
+        public List<Haplotype> QueryTopHaplotypesForColumn(
             InputRecord input,
             List<string> orderedLoci,
             Dictionary<string, bool> useLocus,
             int topN,
-            string ifNoRaceUse = "FiveRaceAverage",
-            string ifNoHapsUse = "HighestOfAnyRace")
+            string freqCol)
         {
-            // Determine frequency column to use
-            string raceCol = !string.IsNullOrWhiteSpace(input.Race)
-                ? input.Race.Trim().ToUpperInvariant()
-                : ifNoRaceUse;
-
-            // Attempt with raceCol first, then fallback if empty
-            var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, raceCol);
-            if (haps.Count > 0) return haps;
-
-            if (!raceCol.Equals(ifNoHapsUse, StringComparison.OrdinalIgnoreCase))
-                return QueryStepwiseInternal(input, orderedLoci, useLocus, topN, ifNoHapsUse);
-
-            return haps;
+            return QueryStepwiseInternal(input, orderedLoci, useLocus, topN, freqCol);
         }
+
+
+        // ===========================================================
+        // ✅ NEW: Build Class II null-DRB345 reference from the panel
+        // ===========================================================
+        public ClassIINullDrb345Reference BuildClassIINullReference()
+        {
+            var fullNull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nullCapable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var expressedCapable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using var conn = new SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT DISTINCT drb1, drb345, dqa1, dqb1 FROM Haplotypes;";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    string drb1 = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                    string drb345 = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                    string dqa1 = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    string dqb1 = reader.IsDBNull(3) ? "" : reader.GetString(3);
+
+                    string drb1Key = ClassIINullDrb345Reference.TwoField(drb1);
+                    if (string.IsNullOrWhiteSpace(drb1Key)) continue;
+
+                    if (ClassIINullDrb345Reference.IsNullDrb345(drb345))
+                    {
+                        nullCapable.Add(drb1Key);
+                        fullNull.Add(ClassIINullDrb345Reference.BuildKey(drb1, dqa1, dqb1));
+                    }
+                    else
+                    {
+                        expressedCapable.Add(drb1Key);
+                    }
+                }
+            }
+            catch
+            {
+                // DB not ready or query failed -> empty reference (corrections are simply skipped).
+                return new ClassIINullDrb345Reference(
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            // "Always null" = a DRB1 that NEVER appears with an expressed DRB3/4/5 in the panel.
+            // This is what captures DRB1*01 / *08 / *10 automatically, with no hardcoding.
+            var alwaysNull = new HashSet<string>(nullCapable, StringComparer.OrdinalIgnoreCase);
+            alwaysNull.ExceptWith(expressedCapable);
+
+            return new ClassIINullDrb345Reference(fullNull, alwaysNull);
+        }
+
 
         private List<Haplotype> QueryStepwiseInternal(
             InputRecord input,
@@ -480,6 +606,77 @@ LIMIT @topN;
         {
             if (line.Contains('\t')) return line.Split('\t');
             return line.Split(',');
+        }
+    }
+
+    /// <summary>
+    /// Immutable lookup used to decide whether a DRB1 allele should carry a
+    /// null (DRBX*NNNN) DRB3/4/5, based entirely on the imputation reference panel.
+    /// </summary>
+    public sealed class ClassIINullDrb345Reference
+    {
+        private readonly HashSet<string> _fullNullKeys;   // "DRB1|DQA1|DQB1" (two-field)
+        private readonly HashSet<string> _alwaysNullDrb1; // DRB1 (two-field) that is only ever null
+
+        public ClassIINullDrb345Reference(
+            HashSet<string> fullNullKeys,
+            HashSet<string> alwaysNullDrb1)
+        {
+            _fullNullKeys = fullNullKeys ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _alwaysNullDrb1 = alwaysNullDrb1 ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public int Count => _fullNullKeys.Count + _alwaysNullDrb1.Count;
+
+        // Matches the app's existing DRB345 convention (blank / DRBX* / trailing 'N' => null).
+        public static bool IsNullDrb345(string drb345)
+        {
+            if (string.IsNullOrWhiteSpace(drb345)) return true;
+            drb345 = drb345.Trim();
+            if (drb345.StartsWith("DRBX", StringComparison.OrdinalIgnoreCase)) return true;
+            if (drb345.EndsWith("N", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        public static string TwoField(string allele)
+        {
+            if (string.IsNullOrWhiteSpace(allele)) return "";
+            return AlleleUtils.ToTwoField(
+                AlleleUtils.NormalizeLeadingZeros(allele.Trim()));
+        }
+
+        public static string BuildKey(string drb1, string dqa1, string dqb1)
+            => $"{TwoField(drb1)}|{TwoField(dqa1)}|{TwoField(dqb1)}";
+
+        /// <summary>
+        /// True if this DRB1 allele forms a known null (DRBX*NNNN) Class II haplotype.
+        /// Uses available DQ data; falls back to "always-null DRB1" when DQ is missing.
+        /// </summary>
+        public bool IsDrb1NullAssociated(
+            string drb1,
+            string dqa1a, string dqa1b,
+            string dqb1a, string dqb1b)
+        {
+            string d = TwoField(drb1);
+            if (string.IsNullOrWhiteSpace(d)) return false;
+
+            // Strongest evidence: DRB1 that is null across the entire panel.
+            if (_alwaysNullDrb1.Contains(d)) return true;
+
+            // Otherwise require a full DRB1-DQA1-DQB1 null haplotype using the sample's DQ.
+            string[] dqas = { dqa1a, dqa1b };
+            string[] dqbs = { dqb1a, dqb1b };
+            foreach (var qa in dqas)
+            {
+                if (string.IsNullOrWhiteSpace(qa)) continue;
+                foreach (var qb in dqbs)
+                {
+                    if (string.IsNullOrWhiteSpace(qb)) continue;
+                    if (_fullNullKeys.Contains(BuildKey(drb1, qa, qb)))
+                        return true;
+                }
+            }
+            return false;
         }
     }
 }

@@ -11,7 +11,7 @@ namespace HLAImputation.Services
         private readonly ReferenceStore _store;
 
         // Settings driven by GUI
-        public int MaxHaplotypes { get; set; } = 1000;
+        public int MaxHaplotypes { get; set; } = 1000000;
         public bool MustMatchInput { get; set; } = true;
 
         // Input conversion mode: "Raw", "TwoField", "OneField"
@@ -40,34 +40,88 @@ namespace HLAImputation.Services
             _store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
-        public DiplotypeResult? ProcessSingle(InputRecord input)
+        // Race Handling Strategy:
+            // Race provided: CAU → FiveRaceAverage → HighestOfAnyRace ✅
+            // No race: FiveRaceAverage → HighestOfAnyRace ✅
+
+        public DiplotypeResult? ProcessSingle(
+    InputRecord input,
+    out string failureReason,
+    out string raceStrategyUsed)
         {
-            // 0) Make a transformed copy of the input that will be used in imputation
+            failureReason = "";
+            raceStrategyUsed = "";
+
             var transformed = TransformInputForImputation(input);
+            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
 
-            // 1) Stepwise haplotype filtering in the requested order (matches R approach) [1](https://upmchs-my.sharepoint.com/personal/ellisoniima_upmc_edu/_layouts/15/Doc.aspx?sourcedoc=%7B321304C1-EB93-4927-9379-E5184A9B5802%7D&file=Imputation%20Pipeline%20Description%2002062026.docx&action=default&mobileredirect=true&DefaultItemOpen=1)
-            var candidates = _store.QueryTopHaplotypesStepwise(
-                transformed,
-                orderedLoci: SearchOrder,
-                useLocus: UseLocus,
-                topN: MaxHaplotypes,
-                ifNoRaceUse: IfNoRaceListedUse,
-                ifNoHapsUse: IfNoHapsForRaceUse
-            );
+            // Build the ordered strategy chain
+            // Race provided:  RACE -> FiveRaceAverage -> HighestOfAnyRace
+            // No race:        FiveRaceAverage -> HighestOfAnyRace
+            var attempts = new List<(string Column, string Label)>();
 
-            if (candidates.Count < 2)
-                return null;
+            if (hasRace)
+            {
+                string raceCol = input.Race.Trim().ToUpperInvariant();
+                attempts.Add((raceCol, "Race-specific (" + raceCol + ")"));
+                attempts.Add(("FiveRaceAverage", "Five-race average (fallback after race)"));
+                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+            }
+            else
+            {
+                attempts.Add(("FiveRaceAverage", "Five-race average (no race listed)"));
+                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+            }
 
-            // 2) Sort by freq desc and choose best diplotype under constraints
-            candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
+            string lastFailureReason = "Imputation failed.";
 
-            var best = FindBestDiplotypePruned(transformed, candidates);
+            foreach (var attempt in attempts)
+            {
+                raceStrategyUsed = attempt.Label;
 
-            if (best == null)
-                return null;
+                var candidates = _store.QueryTopHaplotypesForColumn(
+                    transformed,
+                    orderedLoci: SearchOrder,
+                    useLocus: UseLocus,
+                    topN: MaxHaplotypes,
+                    freqCol: attempt.Column
+                );
 
-            best.FinalSelection = "highest frequency";
-            return best;
+                if (candidates == null || candidates.Count == 0)
+                {
+                    lastFailureReason =
+                        "No candidate haplotypes were found using " + attempt.Column + ".";
+
+                    continue; // try next tier
+                }
+
+                candidates = candidates.OrderByDescending(h => h.Frequency).ToList();
+
+                bool singleHaplotypeCandidate = candidates.Count == 1;
+
+                var best = FindBestDiplotypePruned(transformed, candidates);
+
+                if (best != null)
+                {
+                    best.FinalSelection =
+                        singleHaplotypeCandidate
+                            ? "single haplotype homozygous imputation"
+                            : "highest frequency";
+                    best.RaceStrategyUsed = raceStrategyUsed;
+                    best.FailureReason = "";
+                    best.IsSingleHaplotypeImputation = singleHaplotypeCandidate;
+                    return best;
+                }
+
+                lastFailureReason = MustMatchInput
+                    ? "No diplotype fully matched the input at the one-field level using " + attempt.Column + " (Must Match Input / strict mode)."
+                    : "No acceptable diplotype could be formed using " + attempt.Column + ".";
+                // try next tier
+            }
+
+            // All tiers failed
+            failureReason = lastFailureReason;
+            return null;
         }
 
         private InputRecord TransformInputForImputation(InputRecord input)

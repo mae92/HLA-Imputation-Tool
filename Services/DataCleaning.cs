@@ -20,6 +20,17 @@ namespace HLAImputation.Services
     {
         private readonly GGroupConversionService _gGroupService;
 
+        // ✅ Reference-driven DRB345 null correction (populated once by MainWindow).
+        public ClassIINullDrb345Reference? NullDrb345Reference { get; set; }
+
+        // ✅ Audit: transformed records whose DRB345 was corrected (deduped by TxID).
+        public readonly HashSet<string> Drb345CorrectedTxIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // ✅ Audit: reason string per corrected TxID (keyed by transformed/variant TxID).
+        public readonly Dictionary<string, string> Drb345CorrectionReasons =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         public DataCleaning(GGroupConversionService gGroupService)
         {
             _gGroupService = gGroupService;
@@ -97,7 +108,78 @@ namespace HLAImputation.Services
                 copy.Loci[locus] = new[] { t1, t2 };
             }
 
+            ApplyReferenceBasedDrb345Corrections(copy);
+
             return copy;
+        }
+
+        /// <summary>
+        /// Reference-driven DRB345 null correction.
+        /// Data are UNPHASED, so we treat DRB345 as an unordered pair:
+        ///   1) count how many DRB1 alleles form a known DRBX*NNNN haplotype in the panel,
+        ///   2) only ever convert spurious EXPRESSED DRB345 slots to DRBX*NNNN to reach that count.
+        /// We never fabricate an expressed DRB3/4/5 allele.
+        /// </summary>
+        private void ApplyReferenceBasedDrb345Corrections(InputRecord record)
+        {
+            var reference = NullDrb345Reference;
+            if (reference == null || reference.Count == 0)
+                return;
+
+            if (!record.Loci.ContainsKey("DRB1")) return;
+            if (!record.Loci.ContainsKey("DRB345")) return;
+
+            var drb1 = record.Loci["DRB1"];
+            var drb345 = record.Loci["DRB345"];
+            if (drb1 == null || drb1.Length < 2) return;
+            if (drb345 == null || drb345.Length < 2) return;
+
+            // Available DQ alleles (may be blank; matcher handles that).
+            string dqa1a = "", dqa1b = "", dqb1a = "", dqb1b = "";
+            if (record.Loci.TryGetValue("DQA1", out var dqa) && dqa != null)
+            {
+                dqa1a = dqa.Length > 0 ? dqa[0] ?? "" : "";
+                dqa1b = dqa.Length > 1 ? dqa[1] ?? "" : "";
+            }
+            if (record.Loci.TryGetValue("DQB1", out var dqb) && dqb != null)
+            {
+                dqb1a = dqb.Length > 0 ? dqb[0] ?? "" : "";
+                dqb1b = dqb.Length > 1 ? dqb[1] ?? "" : "";
+            }
+
+            // 1) How many DRB1 alleles are null-associated?
+            int nullCount = 0;
+            if (reference.IsDrb1NullAssociated(drb1[0] ?? "", dqa1a, dqa1b, dqb1a, dqb1b)) nullCount++;
+            if (reference.IsDrb1NullAssociated(drb1[1] ?? "", dqa1a, dqa1b, dqb1a, dqb1b)) nullCount++;
+            if (nullCount == 0) return;
+
+            // 2) Current DRB345 null state (order-independent).
+            string d1 = drb345[0] ?? "";
+            string d2 = drb345[1] ?? "";
+            bool d1Null = ClassIINullDrb345Reference.IsNullDrb345(d1);
+            bool d2Null = ClassIINullDrb345Reference.IsNullDrb345(d2);
+            int currentNullCount = (d1Null ? 1 : 0) + (d2Null ? 1 : 0);
+
+            // 3) Only ADD nulls; convert expressed slots until counts agree.
+            int needToConvert = nullCount - currentNullCount;
+            if (needToConvert <= 0) return;
+
+            string new1 = d1;
+            string new2 = d2;
+
+            if (needToConvert > 0 && !d1Null) { new1 = "DRBX*NNNN"; needToConvert--; }
+            if (needToConvert > 0 && !d2Null) { new2 = "DRBX*NNNN"; needToConvert--; }
+
+            if (!string.Equals(new1, d1, StringComparison.OrdinalIgnoreCase) ||
+    !string.Equals(new2, d2, StringComparison.OrdinalIgnoreCase))
+            {
+                record.Loci["DRB345"] = new[] { new1, new2 };
+                string tx = record.TxID ?? "";
+                Drb345CorrectedTxIds.Add(tx);
+                Drb345CorrectionReasons[tx] =
+                    $"Reference DRB345 null correction: [{d1} / {d2}] → [{new1} / {new2}] " +
+                    $"(DRB1 null-haplotype count = {nullCount})";
+            }
         }
 
         private string NormalizeDRB345Allele(string allele)
