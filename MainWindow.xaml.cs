@@ -59,28 +59,67 @@ namespace HLAImputation
             InitializeComponent();
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            
             string refCsvPath = System.IO.Path.Combine(baseDir, "Reference", "A-C-B-DRB-DQ-DP_Haplotypes_Dataframe.csv");
+            
+            if (!System.IO.File.Exists(refCsvPath))
+            {
+                MessageBox.Show(
+                    "Reference CSV not found:\n" +
+                    refCsvPath);
+
+                Close();
+                return;
+            }
+
             string gGroupTablePath = System.IO.Path.Combine(baseDir, "Reference", "g-group_conversion_table.csv");
 
             if (!System.IO.File.Exists(gGroupTablePath))
             {
-                MessageBox.Show("G-Group table not found:\n" + gGroupTablePath);
+                MessageBox.Show(
+                    "G-Group table not found:\n" +
+                    gGroupTablePath);
+
+                Close();
                 return;
             }
 
-            string serologyMapPath = System.IO.Path.Combine(baseDir, "Reference", "Antigen_to_OneFieldMol_Final_02192024.csv");
+
+            string serologyMapPath =
+                System.IO.Path.Combine(
+                    baseDir,
+                    "Reference",
+                    "Antigen_to_OneFieldMol_Final_02192024.csv");
+
             _seroService = System.IO.File.Exists(serologyMapPath)
                 ? new SerologyToOneFieldMolService(serologyMapPath)
                 : null;
 
-            string dbDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Imputation_App");
+            string dbPath = System.IO.Path.Combine(
+                baseDir,
+                "Reference",
+                "hapref.sqlite");
 
-            string dbPath = System.IO.Path.Combine(dbDir, "hapref.sqlite");
+            MessageBox.Show(
+                "Current Reference Database loading from:\n\n" +
+                dbPath,
+                "HLA Imputation Tool",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+
+            if (!System.IO.File.Exists(dbPath))
+            {
+                MessageBox.Show(
+                    "SQLite database not found:\n" +
+                    dbPath +
+                    "\n\nThe application will rebuild it from the reference CSV.");
+            }
 
             _refStore = new ReferenceStore(refCsvPath, dbPath);
+
             _engine = new ImputationEngine(_refStore);
+
 
             _gGroupService = new GGroupConversionService(gGroupTablePath);
             _dataCleaning = new DataCleaning(_gGroupService);
@@ -312,6 +351,7 @@ namespace HLAImputation
         // ===========================================================
         private async void Run_Click(object sender, RoutedEventArgs e)
         {
+
             if (_inputData == null || _inputData.Count == 0)
             {
                 MessageBox.Show("Load an input CSV first.");
@@ -349,6 +389,19 @@ namespace HLAImputation
             bool convertToGGroup = (cbConvertToGGroup?.IsChecked == true);
             string resolutionMode = GetResolutionMode();
             var baseUseLocus = GetUseLocusMap();
+
+            // ✅ Build the Class II null-DRB345 reference once (cached), then reset the audit.
+            try
+            {
+                if (_dataCleaning.NullDrb345Reference == null)
+                    _dataCleaning.NullDrb345Reference = _refStore.BuildClassIINullReference();
+            }
+            catch { /* if unavailable, DRB345 corrections are simply skipped */ }
+            _dataCleaning.Drb345CorrectedTxIds.Clear();
+            _dataCleaning.Drb345CorrectionReasons.Clear();
+
+
+
             bool iterativeEnabled = (cbUseIterativeApproach?.IsChecked == true);
 
             // ✅ Cache run settings for Export "Run Settings"
@@ -504,6 +557,19 @@ namespace HLAImputation
                 })
                 .ToList();
 
+            _lastRunSettings["Drb345ReferenceCorrections"] =
+            _dataCleaning.Drb345CorrectedTxIds.Count.ToString();
+
+            // ✅ NEW: build per-sample cleaning audit and attach a right-side summary.
+            var cleaningAudit = BuildCleaningAudit();
+            foreach (var disp in _allResults)
+            {
+                disp.CleaningSummary =
+                    cleaningAudit.TryGetValue(disp.TxID, out var notes) && notes.Count > 0
+                        ? string.Join(" | ", notes)
+                        : "";
+            }
+
             UpdateQcReportForCurrentView();
             RefreshResultGridDisplay();
             RefreshInputGridDisplay();
@@ -513,6 +579,44 @@ namespace HLAImputation
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
             _cts?.Cancel();
+        }
+
+        // ✅ NEW: Collects every cleaning action applied to each sample, keyed by BASE TxID.
+        private Dictionary<string, List<string>> BuildCleaningAudit()
+        {
+            var audit = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            void Add(string baseTx, string note)
+            {
+                if (string.IsNullOrWhiteSpace(baseTx) || string.IsNullOrWhiteSpace(note)) return;
+                if (!audit.TryGetValue(baseTx, out var list))
+                {
+                    list = new List<string>();
+                    audit[baseTx] = list;
+                }
+                if (!list.Contains(note)) list.Add(note);
+            }
+
+            // 1) Read-time notes captured by CsvLoader (allele fixes + DRB345 handling).
+            if (_rawInputData != null)
+            {
+                foreach (var r in _rawInputData)
+                {
+                    if (r.CleaningNotes == null) continue;
+                    foreach (var n in r.CleaningNotes)
+                        Add(r.TxID, n);
+                }
+            }
+
+            // 2) Reference-based DRB345 null corrections (keyed by transformed/variant TxID).
+            foreach (var kv in _dataCleaning.Drb345CorrectionReasons)
+            {
+                string variantTx = kv.Key;
+                string baseTx = _variantToBaseTx.TryGetValue(variantTx, out var b) ? b : variantTx;
+                Add(baseTx, kv.Value);
+            }
+
+            return audit;
         }
 
         // ===========================================================
@@ -1147,6 +1251,33 @@ namespace HLAImputation
             }
 
             wsSettings.Columns().AdjustToContents();
+
+            // ===========================================================
+            // Sheet 7: Cleaning Audit (per-sample cleaning actions)
+            // ===========================================================
+            var wsAudit = wb.Worksheets.Add("Cleaning Audit");
+            wsAudit.Cell(1, 1).Value = "TxID";
+            wsAudit.Cell(1, 2).Value = "Cleaning Actions Applied";
+            wsAudit.Row(1).Style.Font.Bold = true;
+
+            var auditMap = BuildCleaningAudit();
+            int ar = 2;
+            foreach (var res in _allResults)
+            {
+                var notes = auditMap.TryGetValue(res.TxID, out var list) && list.Count > 0
+                    ? list
+                    : new List<string>();
+
+                wsAudit.Cell(ar, 1).Value = res.TxID;
+                wsAudit.Cell(ar, 2).Value =
+                    notes.Count > 0 ? string.Join("\n", notes) : "(no cleaning actions)";
+                wsAudit.Cell(ar, 2).Style.Alignment.WrapText = true;
+                ar++;
+            }
+            wsAudit.Cell(ar + 1, 1).Value =
+                $"Samples with ≥1 cleaning action: {_allResults.Count(x => !string.IsNullOrWhiteSpace(x.CleaningSummary))}";
+            wsAudit.Column(1).AdjustToContents();
+            wsAudit.Column(2).Width = 90;
 
             // ===========================================================
             // SAVE

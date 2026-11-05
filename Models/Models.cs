@@ -11,6 +11,9 @@ namespace HLAImputation.Models
 
         // Locus -> [allele1, allele2]
         public Dictionary<string, string[]> Loci { get; set; } = new Dictionary<string, string[]>();
+
+        // ✅ NEW: per-sample cleaning audit trail (populated by CsvLoader).
+        public List<string> CleaningNotes { get; set; } = new List<string>();
     }
 
     public sealed class Haplotype
@@ -41,7 +44,7 @@ namespace HLAImputation.Models
         public string RaceStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
-
+        public bool IsSingleHaplotypeImputation { get; set; }
         public string FinalSelection { get; set; } = "";
     }
 }

@@ -10,36 +10,87 @@ namespace HLAImputation.Services
     public static class CsvLoader
     {
 
+        // ===========================================================
+        // ✅ NEW: Reference-alignment allele fixes.
+        // Some input alleles carry expression suffixes (N / M) that do NOT
+        // exist in the imputation reference panel. Map each one to the
+        // expressed allele the reference uses so the input can match.
+        // Keys are matched case-insensitively against the full "LOCUS*fields" string.
+        // ===========================================================
+        private static readonly Dictionary<string, string> InputAlleleFixes =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "A*24:09N",    "A*24:02"    },
+            { "B*51:11N",    "B*51:01"    },
+            { "C*04:09M",    "C*04:01"    },
+            { "DRB4*01:03N", "DRB4*01:01" },
+            { "DRB5*01:08N", "DRB5*01:02" },
+        };
+
+        private static string FixInputAllele(string allele)
+        {
+            if (string.IsNullOrWhiteSpace(allele)) return allele;
+            string key = allele.Trim();
+            return InputAlleleFixes.TryGetValue(key, out var fixedAllele)
+                ? fixedAllele
+                : allele;
+        }
+
 
         // ===========================================================
         // ✅ DRB345 NORMALIZATION (CsvLoader scope)
         // ===========================================================
 
-        private static string NormalizeDRB345Allele(string allele, string locusHint = "")
+        private static string NormalizeDRB345Allele(
+string allele, string locusHint, List<string> notes, string slotLabel)
         {
             if (string.IsNullOrWhiteSpace(allele))
-                return "DRBX*NNNN";
+                return "DRBX*NNNN"; // blank handled/logged by the caller (hemizygous / absent)
 
             allele = allele.Trim();
 
-            if (allele.EndsWith("N", StringComparison.OrdinalIgnoreCase))
-                return "DRBX*NNNN";
-
+            // Attach the gene prefix FIRST so reference-fix keys like "DRB4*01:03N"
+            // can match even if the lab stored the allele without a "DRB4*" prefix.
             if (!allele.Contains("*"))
             {
                 if (locusHint.Equals("DRB3", StringComparison.OrdinalIgnoreCase))
-                    return "DRB3*" + allele;
-                if (locusHint.Equals("DRB4", StringComparison.OrdinalIgnoreCase))
-                    return "DRB4*" + allele;
-                if (locusHint.Equals("DRB5", StringComparison.OrdinalIgnoreCase))
-                    return "DRB5*" + allele;
+                    allele = "DRB3*" + allele;
+                else if (locusHint.Equals("DRB4", StringComparison.OrdinalIgnoreCase))
+                    allele = "DRB4*" + allele;
+                else if (locusHint.Equals("DRB5", StringComparison.OrdinalIgnoreCase))
+                    allele = "DRB5*" + allele;
+                else
+                    allele = "DRB4*" + allele; // safe default
+            }
 
-                return "DRB4*" + allele; // safe default
+            // Reference-alignment fix BEFORE null-collapse (e.g., DRB4*01:03N -> DRB4*01:01).
+            string beforeFix = allele;
+            allele = FixInputAllele(allele);
+            if (!string.Equals(allele, beforeFix, StringComparison.OrdinalIgnoreCase))
+                notes?.Add($"DRB345 reference-alignment fix [{slotLabel}]: {beforeFix} → {allele}");
+
+            // Any allele still ending in N is a TRUE null -> placeholder.
+            if (allele.EndsWith("N", StringComparison.OrdinalIgnoreCase))
+            {
+                notes?.Add($"DRB345 null allele collapsed [{slotLabel}]: {beforeFix} → DRBX*NNNN");
+                return "DRBX*NNNN";
             }
 
             return allele;
         }
 
+
+        // ===========================================================
+        // ✅ NEW: Detect the lab's homozygous marker ("-") in a DRB3/4/5 slot.
+        // "-" means "same as the paired allele" (true homozygote),
+        // NOT a new allele and NOT a null.
+        // ===========================================================
+        private static bool IsHomozygousMarker(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            s = s.Trim();
+            return s == "-" || s == "–" || s == "—"; // hyphen + en/em dash, just in case
+        }
 
 
         public static List<InputRecord> LoadInput(string path, Action<int>? progressCallback = null)
@@ -66,8 +117,21 @@ namespace HLAImputation.Services
             for (int i = 0; i < header.Length; i++)
                 col[header[i].Trim()] = i;
 
+            // Row-scoped audit notes. Reassigned at the top of each row (see B-2).
+            List<string> currentRowNotes = new List<string>();
+
             string Get(string[] parts, string name)
-                => col.ContainsKey(name) && col[name] < parts.Length ? parts[col[name]].Trim() : "";
+            {
+                if (!col.ContainsKey(name) || col[name] >= parts.Length) return "";
+                string raw = parts[col[name]].Trim();
+                if (string.IsNullOrWhiteSpace(raw)) return "";
+
+                string fixedVal = FixInputAllele(raw);
+                if (!string.Equals(fixedVal, raw, StringComparison.OrdinalIgnoreCase))
+                    currentRowNotes.Add($"Reference-alignment fix [{name}]: {raw} → {fixedVal}");
+
+                return fixedVal;
+            }
 
             // ===========================================================
             // ✅ NEW: Ensure UNIQUE TxID values by appending .1, .2, ...
@@ -100,6 +164,9 @@ namespace HLAImputation.Services
                         progressCallback(pct);
                     }
                 }
+
+                // ✅ NEW: start a fresh audit list for this row.
+                currentRowNotes = new List<string>();
 
                 var parts = line.Split(',');
 
@@ -155,55 +222,74 @@ namespace HLAImputation.Services
                 r.Loci["DPB1"] = new[] { Get(parts, "dpb1"), Get(parts, "dpb2") };
                 r.Loci["DPA1"] = new[] { Get(parts, "dpa1"), Get(parts, "dpa2") };
 
-                // ✅ Build DRB345 from drb3/4/5 columns
 
-                // ✅ Build DRB345 from drb3/4/5 columns while preserving the correct DRB3 / DRB4 / DRB5 prefix
-                var drb345List = new List<(string Allele, string Prefix)>
-{
-    (Get(parts, "drb31"), "DRB3"),
-    (Get(parts, "drb32"), "DRB3"),
-    (Get(parts, "drb41"), "DRB4"),
-    (Get(parts, "drb42"), "DRB4"),
-    (Get(parts, "drb51"), "DRB5"),
-    (Get(parts, "drb52"), "DRB5")
-}
-                .Where(x => !string.IsNullOrWhiteSpace(x.Allele))
-                .ToList();
+                // ✅ Build DRB345 from drb3/4/5 columns while preserving gene identity.
+                // IMPORTANT: the lab uses "-" in the second slot to mean HOMOZYGOUS
+                // ("same as the paired allele"), which is different from a blank slot
+                // (HEMIZYGOUS -> the second copy is the null placeholder DRBX*NNNN).
+                var drb345Raw = new List<(string Allele, string Prefix)>
+                {
+                    (Get(parts, "drb31"), "DRB3"),
+                    (Get(parts, "drb32"), "DRB3"),
+                    (Get(parts, "drb41"), "DRB4"),
+                    (Get(parts, "drb42"), "DRB4"),
+                    (Get(parts, "drb51"), "DRB5"),
+                    (Get(parts, "drb52"), "DRB5")
+                };
 
-                // ✅ Apply your rules
+                // Was a homozygous marker ("-") present anywhere in the DRB3/4/5 slots?
+                bool drbHasHomozygousMarker =
+                    drb345Raw.Any(x => IsHomozygousMarker(x.Allele));
+
+                // Keep only genuinely expressed alleles (drop blanks AND "-").
+                var drb345Real = drb345Raw
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Allele) && !IsHomozygousMarker(x.Allele))
+                    .ToList();
+
                 string drb345_1 = "";
                 string drb345_2 = "";
-
                 string drb345_1_prefix = "";
                 string drb345_2_prefix = "";
 
-                if (drb345List.Count == 1)
+                if (drb345Real.Count >= 2)
                 {
-                    // Only one allele → duplicate
-                    drb345_1 = drb345List[0].Allele;
-                    drb345_2 = drb345List[0].Allele;
-
-                    drb345_1_prefix = drb345List[0].Prefix;
-                    drb345_2_prefix = drb345List[0].Prefix;
+                    // Two expressed alleles (e.g., DR3/DR4, or a true DRB3 heterozygote).
+                    drb345_1 = drb345Real[0].Allele; drb345_1_prefix = drb345Real[0].Prefix;
+                    drb345_2 = drb345Real[1].Allele; drb345_2_prefix = drb345Real[1].Prefix;
                 }
-                else if (drb345List.Count >= 2)
+                else if (drb345Real.Count == 1)
                 {
-                    // Take first two
-                    drb345_1 = drb345List[0].Allele;
-                    drb345_2 = drb345List[1].Allele;
-
-                    drb345_1_prefix = drb345List[0].Prefix;
-                    drb345_2_prefix = drb345List[1].Prefix;
+                    drb345_1 = drb345Real[0].Allele; drb345_1_prefix = drb345Real[0].Prefix;
+                    if (drbHasHomozygousMarker)
+                    {
+                        // "-" present => TRUE homozygote => copy the expressed allele.
+                        drb345_2 = drb345Real[0].Allele; drb345_2_prefix = drb345Real[0].Prefix;
+                        currentRowNotes.Add(
+                            $"DRB345 homozygous marker '-' expanded: {drb345Real[0].Allele} copied to both slots");
+                    }
+                    else
+                    {
+                        // No marker => hemizygous => second copy is the null placeholder.
+                        drb345_2 = ""; drb345_2_prefix = ""; // NormalizeDRB345Allele("") => DRBX*NNNN
+                        currentRowNotes.Add(
+                            $"DRB345 hemizygous: single {drb345Real[0].Allele}, second slot set to DRBX*NNNN");
+                    }
+                }
+                else
+                {
+                    // No expressed DRB3/4/5 => both null.
+                    drb345_1 = ""; drb345_1_prefix = "";
+                    drb345_2 = ""; drb345_2_prefix = "";
                 }
 
                 r.Loci["DRB345"] = new[]
-                {
-    NormalizeDRB345Allele(drb345_1, drb345_1_prefix),
-    NormalizeDRB345Allele(drb345_2, drb345_2_prefix)
-};
+{
+                    NormalizeDRB345Allele(drb345_1, drb345_1_prefix, currentRowNotes, "slot1"),
+                    NormalizeDRB345Allele(drb345_2, drb345_2_prefix, currentRowNotes, "slot2")
+                };
 
-
-
+                // ✅ NEW: attach this row's audit notes to the record.
+                r.CleaningNotes = currentRowNotes;
 
                 list.Add(r);
             }
