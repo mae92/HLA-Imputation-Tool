@@ -1,4 +1,6 @@
 ﻿
+using HLAImputation.Models;
+using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -6,8 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
-using Microsoft.Data.Sqlite;
-using HLAImputation.Models;
+using System.Windows;
 
 namespace HLAImputation.Services
 {
@@ -41,13 +42,49 @@ namespace HLAImputation.Services
         /// </summary>
         public void EnsureBuilt(Action<int>? refProgressCallback = null, Action<int>? dbProgressCallback = null)
         {
-            if (IsDbValid(_dbPath))
+            bool rebuildNeeded = false;
+
+            if (!IsDbValid(_dbPath))
             {
-                Debug.WriteLine("ReferenceStore: DB already valid — skipping build.");
+                rebuildNeeded = true;
+            }
+            else
+            {
+                DateTime csvTime =
+                    File.GetLastWriteTimeUtc(_csvPath);
+
+                DateTime dbTime =
+                    File.GetLastWriteTimeUtc(_dbPath);
+
+                if (csvTime > dbTime)
+                {
+                    rebuildNeeded = true;
+
+                    Debug.WriteLine(
+                        "ReferenceStore: CSV is newer than SQLite. Rebuild required.");
+                }
+            }
+
+            if (!rebuildNeeded)
+            {
+                Debug.WriteLine(
+                    "ReferenceStore: Existing SQLite database is current.");
+
                 refProgressCallback?.Invoke(100);
                 dbProgressCallback?.Invoke(100);
+
                 return;
             }
+
+            MessageBox.Show(
+                "The reference panel has changed or the SQLite database is missing." +
+                "\n\n" +
+                "A new SQLite database will now be created." +
+                "\n\n" +
+                "This may take several minutes.",
+                "Updating Reference Database",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
 
             Debug.WriteLine("ReferenceStore: DB missing/invalid — rebuilding.");
 

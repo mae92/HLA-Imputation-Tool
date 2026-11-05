@@ -59,28 +59,67 @@ namespace HLAImputation
             InitializeComponent();
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            
             string refCsvPath = System.IO.Path.Combine(baseDir, "Reference", "A-C-B-DRB-DQ-DP_Haplotypes_Dataframe.csv");
+            
+            if (!System.IO.File.Exists(refCsvPath))
+            {
+                MessageBox.Show(
+                    "Reference CSV not found:\n" +
+                    refCsvPath);
+
+                Close();
+                return;
+            }
+
             string gGroupTablePath = System.IO.Path.Combine(baseDir, "Reference", "g-group_conversion_table.csv");
 
             if (!System.IO.File.Exists(gGroupTablePath))
             {
-                MessageBox.Show("G-Group table not found:\n" + gGroupTablePath);
+                MessageBox.Show(
+                    "G-Group table not found:\n" +
+                    gGroupTablePath);
+
+                Close();
                 return;
             }
 
-            string serologyMapPath = System.IO.Path.Combine(baseDir, "Reference", "Antigen_to_OneFieldMol_Final_02192024.csv");
+
+            string serologyMapPath =
+                System.IO.Path.Combine(
+                    baseDir,
+                    "Reference",
+                    "Antigen_to_OneFieldMol_Final_02192024.csv");
+
             _seroService = System.IO.File.Exists(serologyMapPath)
                 ? new SerologyToOneFieldMolService(serologyMapPath)
                 : null;
 
-            string dbDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Imputation_App");
+            string dbPath = System.IO.Path.Combine(
+                baseDir,
+                "Reference",
+                "hapref.sqlite");
 
-            string dbPath = System.IO.Path.Combine(dbDir, "hapref.sqlite");
+            MessageBox.Show(
+                "Current Reference Database loading from:\n\n" +
+                dbPath,
+                "HLA Imputation Tool",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+
+            if (!System.IO.File.Exists(dbPath))
+            {
+                MessageBox.Show(
+                    "SQLite database not found:\n" +
+                    dbPath +
+                    "\n\nThe application will rebuild it from the reference CSV.");
+            }
 
             _refStore = new ReferenceStore(refCsvPath, dbPath);
+
             _engine = new ImputationEngine(_refStore);
+
 
             _gGroupService = new GGroupConversionService(gGroupTablePath);
             _dataCleaning = new DataCleaning(_gGroupService);
