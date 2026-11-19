@@ -9,14 +9,15 @@
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Top"
                     Background="#2C3E50" Height="60" VerticalAlignment="Center">
 
-            <TextBlock Text="HLA Imputation Tool"
+            <TextBlock Text="HLA Imputation Tool v2"
                        Foreground="White"
                        FontWeight="Bold" 
                        FontSize="32"
                        Margin="10,0"
                        VerticalAlignment="Center"/>
 
-            <Button Content="Upload CSV" Width="120" Margin="70,15,10,15" Click="UploadCsv_Click"/>
+            <Button Content="Single Sample Upload" Width="130" Margin="20,15,10,15" Click="SingleSample_Click"/>
+            <Button Content="Batch Upload (CSV)" Width="120" Margin="10,15,10,15" Click="UploadCsv_Click"/>
             <Button Content="Run Imputation" Width="120" Margin="10,15,10,15" Click="Run_Click"/>
             <Button Content="Export Excel" Width="120" Margin="10,15,10,15" Click="Export_Click"/>
 
@@ -26,7 +27,7 @@
             <!-- Logos -->
             <Image Source="Logo/upmc-logo-white.png"
                    Height="50"
-                   Margin="160,0,20,0"
+                   Margin="30,0,20,0"
                    VerticalAlignment="Center"/>
 
             <Image Source="Logo/pitt_seal_white_center.png"

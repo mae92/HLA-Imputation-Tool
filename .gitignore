@@ -1,5 +1,11 @@
 .vs/
 bin/
 obj/
+*.exe
+*.pdb
+*.user
 Reference/A-C-B-DRB-DQ-DP_Haplotypes_Dataframe.csv
 Reference
+/Imputation App.exe
+/Imputation App.pdb
+/libSkiaSharp.pdb
