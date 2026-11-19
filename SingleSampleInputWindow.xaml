@@ -69,10 +69,10 @@
                                          Margin="6"/>
 
                                 <TextBlock Grid.Column="2"
-                                           Text="Race:"
+                                           Text="Ethnicity:"
                                            VerticalAlignment="Center"/>
 
-                                <ComboBox x:Name="RaceComboBox"
+                                <ComboBox x:Name="EthnicityComboBox"
                                           Grid.Column="3"
                                           Margin="6"
                                           IsEditable="True"/>

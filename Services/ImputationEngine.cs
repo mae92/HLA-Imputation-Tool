@@ -32,52 +32,52 @@ namespace HLAImputation.Services
             "A","B","DRB1","DQB1","C","DQA1","DRB345","DPB1","DPA1"
         };
 
-        public string IfNoRaceListedUse { get; set; } = "FiveRaceAverage";
-        public string IfNoHapsForRaceUse { get; set; } = "HighestOfAnyRace";
+        public string IfNoEthnicityListedUse { get; set; } = "FiveEthnicityAverage";
+        public string IfNoHapsForEthnicityUse { get; set; } = "HighestOfAnyEthnicity";
 
         public ImputationEngine(ReferenceStore store)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
-        // Race Handling Strategy:
-            // Race provided: CAU → FiveRaceAverage → HighestOfAnyRace ✅
-            // No race: FiveRaceAverage → HighestOfAnyRace ✅
+        // Ethnicity Handling Strategy:
+            // Ethnicity provided: CAU → FiveEthnicityAverage → HighestOfAnyEthnicity ✅
+            // No ethnicity: FiveEthnicityAverage → HighestOfAnyEthnicity ✅
 
         public DiplotypeResult? ProcessSingle(
     InputRecord input,
     out string failureReason,
-    out string raceStrategyUsed)
+    out string ethnicityStrategyUsed)
         {
             failureReason = "";
-            raceStrategyUsed = "";
+            ethnicityStrategyUsed = "";
 
             var transformed = TransformInputForImputation(input);
-            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+            bool hasEthnicity = !string.IsNullOrWhiteSpace(input.Ethnicity);
 
             // Build the ordered strategy chain
-            // Race provided:  RACE -> FiveRaceAverage -> HighestOfAnyRace
-            // No race:        FiveRaceAverage -> HighestOfAnyRace
+            // Ethnicity provided:  ETHNICITY -> FiveEthnicityAverage -> HighestOfAnyEthnicity
+            // No ethnicity:        FiveEthnicityAverage -> HighestOfAnyEthnicity
             var attempts = new List<(string Column, string Label)>();
 
-            if (hasRace)
+            if (hasEthnicity)
             {
-                string raceCol = input.Race.Trim().ToUpperInvariant();
-                attempts.Add((raceCol, "Race-specific (" + raceCol + ")"));
-                attempts.Add(("FiveRaceAverage", "Five-race average (fallback after race)"));
-                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+                string ethnicityCol = input.Ethnicity.Trim().ToUpperInvariant();
+                attempts.Add((ethnicityCol, "Ethnicity-specific (" + ethnicityCol + ")"));
+                attempts.Add(("FiveEthnicityAverage", "Five-ethnicity average (fallback after ethnicity)"));
+                attempts.Add(("HighestOfAnyEthnicity", "Highest of any ethnicity (fallback after five-ethnicity average)"));
             }
             else
             {
-                attempts.Add(("FiveRaceAverage", "Five-race average (no race listed)"));
-                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+                attempts.Add(("FiveEthnicityAverage", "Five-ethnicity average (no ethnicity listed)"));
+                attempts.Add(("HighestOfAnyEthnicity", "Highest of any ethnicity (fallback after five-ethnicity average)"));
             }
 
             string lastFailureReason = "Imputation failed.";
 
             foreach (var attempt in attempts)
             {
-                raceStrategyUsed = attempt.Label;
+                ethnicityStrategyUsed = attempt.Label;
 
                 var candidates = _store.QueryTopHaplotypesForColumn(
                     transformed,
@@ -107,7 +107,7 @@ namespace HLAImputation.Services
                         singleHaplotypeCandidate
                             ? "single haplotype homozygous imputation"
                             : "highest frequency";
-                    best.RaceStrategyUsed = raceStrategyUsed;
+                    best.EthnicityStrategyUsed = ethnicityStrategyUsed;
                     best.FailureReason = "";
                     best.IsSingleHaplotypeImputation = singleHaplotypeCandidate;
                     return best;
@@ -130,7 +130,7 @@ namespace HLAImputation.Services
             var copy = new InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -243,7 +243,7 @@ namespace HLAImputation.Services
             return new DiplotypeResult
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 H1 = bestH1,
                 H2 = bestH2,

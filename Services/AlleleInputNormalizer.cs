@@ -27,7 +27,7 @@ namespace HLAImputation.Services
             var copy = new InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
 
                 CleaningNotes = input.CleaningNotes != null
@@ -41,7 +41,7 @@ namespace HLAImputation.Services
             //var copy = new InputRecord
             //{
             //    TxID = input.TxID,
-            //    Race = input.Race,
+            //    Ethnicity = input.Ethnicity,
             //    PatType = input.PatType,
             //    Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             //};

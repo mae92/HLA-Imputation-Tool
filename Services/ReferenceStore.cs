@@ -17,7 +17,7 @@ namespace HLAImputation.Services
         private readonly string _csvPath;
         private readonly string _dbPath;
 
-        private static readonly string[] FiveRaceCols = { "AFA", "API", "CAU", "HIS", "NAM" };
+        private static readonly string[] FiveEthnicityCols = { "AFA", "API", "CAU", "HIS", "NAM" };
         private static readonly string[] AlleleCols = { "a", "c", "b", "drb345", "drb1", "dqa1", "dqb1", "dpa1", "dpb1" };
 
         private static readonly Dictionary<string, string> ColToLocus = new(StringComparer.OrdinalIgnoreCase)
@@ -32,6 +32,35 @@ namespace HLAImputation.Services
         {
             _csvPath = csvPath;
             _dbPath = dbPath;
+        }
+
+
+        public bool RebuildRequired()
+        {
+            // Database does not exist.
+            if (!File.Exists(_dbPath))
+                return true;
+
+            // Database exists but is incomplete/corrupt/invalid.
+            if (!IsDbValid(_dbPath))
+                return true;
+
+            // If the source CSV exists and is newer than the generated
+            // SQLite database, the database needs to be rebuilt.
+            if (File.Exists(_csvPath))
+            {
+                DateTime csvTime =
+                    File.GetLastWriteTimeUtc(_csvPath);
+
+                DateTime dbTime =
+                    File.GetLastWriteTimeUtc(_dbPath);
+
+                if (csvTime > dbTime)
+                    return true;
+            }
+
+            // Existing database is valid and current.
+            return false;
         }
 
         /// <summary>
@@ -182,7 +211,7 @@ namespace HLAImputation.Services
                     throw new Exception($"Reference CSV missing required allele column '{ac}'");
 
             int lastAllele = colIndex["dpb1"];
-            var raceCols = header.Skip(lastAllele + 1).Select(h => h.Trim()).Where(h => h.Length > 0).ToList();
+            var ethnicityCols = header.Skip(lastAllele + 1).Select(h => h.Trim()).Where(h => h.Length > 0).ToList();
 
             // Pooling=False prevents pooled native handles from keeping the .tmp locked
             var connString = $"Data Source={targetDbPath};Pooling=False;";
@@ -202,9 +231,9 @@ PRAGMA temp_store = MEMORY;";
 
             var allCols = new List<string>();
             allCols.AddRange(AlleleCols);
-            allCols.Add("HighestOfAnyRace");
-            allCols.Add("FiveRaceAverage");
-            allCols.AddRange(raceCols);
+            allCols.Add("HighestOfAnyEthnicity");
+            allCols.Add("FiveEthnicityAverage");
+            allCols.AddRange(ethnicityCols);
 
             string createCols =
                 string.Join(",\n", allCols.Select(c =>
@@ -264,7 +293,7 @@ PRAGMA temp_store = MEMORY;";
                     insert.Parameters["@" + ac].Value = parts[colIndex[ac]].Trim();
 
                 var freqs = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-                foreach (var rc in raceCols)
+                foreach (var rc in ethnicityCols)
                 {
                     double f = ParseDoubleSafe(parts[colIndex[rc]]);
                     freqs[rc] = f;
@@ -272,11 +301,11 @@ PRAGMA temp_store = MEMORY;";
                 }
 
                 double highest = freqs.Count == 0 ? 0.0 : freqs.Values.Max();
-                insert.Parameters["@HighestOfAnyRace"].Value = highest;
+                insert.Parameters["@HighestOfAnyEthnicity"].Value = highest;
 
                 double sum5 = 0.0;
                 int n5 = 0;
-                foreach (var r5 in FiveRaceCols)
+                foreach (var r5 in FiveEthnicityCols)
                 {
                     if (freqs.ContainsKey(r5))
                     {
@@ -285,7 +314,7 @@ PRAGMA temp_store = MEMORY;";
                     }
                 }
                 double avg5 = n5 == 0 ? 0.0 : (sum5 / n5);
-                insert.Parameters["@FiveRaceAverage"].Value = avg5;
+                insert.Parameters["@FiveEthnicityAverage"].Value = avg5;
 
                 insert.ExecuteNonQuery();
             }
@@ -325,24 +354,24 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
     List<string> orderedLoci,
     Dictionary<string, bool> useLocus,
     int topN,
-    string ifNoRaceUse,
+    string ifNoEthnicityUse,
     string ifNoHapsUse,
-    out string raceSourceUsed)
+    out string ethnicitySourceUsed)
         {
-            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+            bool hasEthnicity = !string.IsNullOrWhiteSpace(input.Ethnicity);
 
-            // Primary column: race column if provided, else FiveRaceAverage (via ifNoRaceUse)
-            string primaryCol = hasRace
-                ? input.Race.Trim().ToUpperInvariant()
-                : ifNoRaceUse;
+            // Primary column: ethnicity column if provided, else FiveEthnicityAverage (via ifNoEthnicityUse)
+            string primaryCol = hasEthnicity
+                ? input.Ethnicity.Trim().ToUpperInvariant()
+                : ifNoEthnicityUse;
 
             var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, primaryCol);
 
             if (haps.Count > 0)
             {
-                raceSourceUsed = hasRace
-                    ? "Race-specific (" + primaryCol + ")"
-                    : "Five-race average (no race listed)";
+                ethnicitySourceUsed = hasEthnicity
+                    ? "Ethnicity-specific (" + primaryCol + ")"
+                    : "Five-ethnicity average (no ethnicity listed)";
                 return haps;
             }
 
@@ -353,20 +382,20 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
 
                 if (fallback.Count > 0)
                 {
-                    raceSourceUsed = hasRace
-                        ? "Highest of any race (no haplotypes for listed race)"
-                        : "Highest of any race (no haplotypes for five-race average)";
+                    ethnicitySourceUsed = hasEthnicity
+                        ? "Highest of any ethnicity (no haplotypes for listed ethnicity)"
+                        : "Highest of any ethnicity (no haplotypes for five-ethnicity average)";
                     return fallback;
                 }
             }
 
-            raceSourceUsed = "No haplotypes found (any strategy)";
+            ethnicitySourceUsed = "No haplotypes found (any strategy)";
             return haps;
         }
 
 
-        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyRace").
-        // Used by the engine to retry when diplotype selection fails on the race-specific set.
+        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyEthnicity").
+        // Used by the engine to retry when diplotype selection fails on the ethnicity-specific set.
         public List<Haplotype> QueryTopHaplotypesForColumn(
             InputRecord input,
             List<string> orderedLoci,
@@ -526,7 +555,7 @@ LIMIT @topN;
 
                 list.Add(new Haplotype
                 {
-                    RaceUsed = freqCol,
+                    EthnicityUsed = freqCol,
                     Frequency = freq,
                     Alleles = alleles
                 });

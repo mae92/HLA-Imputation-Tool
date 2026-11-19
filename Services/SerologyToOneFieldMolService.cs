@@ -131,7 +131,7 @@ namespace HLAImputation.Services
             var copy = new Models.InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -230,7 +230,7 @@ namespace HLAImputation.Services
                 var rec = new Models.InputRecord
                 {
                     TxID = $"{normalizedInput.TxID}.{k + 1}",
-                    Race = normalizedInput.Race,
+                    Ethnicity = normalizedInput.Ethnicity,
                     PatType = normalizedInput.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };
@@ -260,7 +260,7 @@ namespace HLAImputation.Services
                 var rec = new Models.InputRecord
                 {
                     TxID = $"{normalizedInput.TxID}.1",
-                    Race = normalizedInput.Race,
+                    Ethnicity = normalizedInput.Ethnicity,
                     PatType = normalizedInput.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };

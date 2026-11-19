@@ -54,6 +54,10 @@ namespace HLAImputation
         // ✅ Lock because iterative approach temporarily overrides _engine.UseLocus per sample attempt
         private readonly object _engineLock = new object();
 
+        // for reference db rebuild progress
+        private bool _referenceInitializationStarted;
+        private bool _referenceInitializationComplete;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -150,7 +154,191 @@ namespace HLAImputation
             // input type toggle
             rbSerological.Checked += (s, e) => RebuildEffectiveInput();
             rbMolecular.Checked += (s, e) => RebuildEffectiveInput();
+
+            Loaded += MainWindow_Loaded;
         }
+
+
+        private async void MainWindow_Loaded(
+    object sender,
+    RoutedEventArgs e)
+        {
+            if (_referenceInitializationStarted)
+                return;
+
+            _referenceInitializationStarted = true;
+
+            LoadingWindow? loadingWindow = null;
+
+            try
+            {
+                // Ask ReferenceStore whether the database actually
+                // needs to be rebuilt.
+                bool rebuildRequired =
+                    _refStore.RebuildRequired();
+
+
+                // =====================================================
+                // CASE 1:
+                // Existing database is valid and current.
+                //
+                // NO loading window is displayed.
+                // =====================================================
+
+                if (!rebuildRequired)
+                {
+                    ImputeStatusText.Text =
+                        "Loading reference database...";
+
+                    await Task.Run(() =>
+                    {
+                        _refStore.EnsureBuilt();
+                    });
+
+                    // Load the Class II / DRB345 reference information
+                    // from the existing database.
+                    _dataCleaning.NullDrb345Reference =
+                        _refStore.BuildClassIINullReference();
+
+                    _referenceInitializationComplete = true;
+
+                    ImputeStatusText.Text =
+                        "Reference database ready.";
+
+                    return;
+                }
+
+
+                // =====================================================
+                // CASE 2:
+                // Database is missing, invalid, or out of date.
+                //
+                // Display the loading window during reconstruction.
+                // =====================================================
+
+                loadingWindow = new LoadingWindow
+                {
+                    Owner = this,
+
+                    WindowStartupLocation =
+                        WindowStartupLocation.CenterOwner
+                };
+
+
+                loadingWindow.UpdateStatus(
+                    "Preparing the HLA reference database...");
+
+                loadingWindow.UpdateReferenceProgress(0);
+
+                loadingWindow.UpdateDbProgress(0);
+
+
+                loadingWindow.Show();
+
+                loadingWindow.Activate();
+
+
+                // Give WPF time to actually paint the loading window
+                // before database construction begins.
+
+                await System.Windows.Threading.Dispatcher.Yield(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+
+                // Perform the expensive database work away from
+                // the WPF UI thread.
+
+                await Task.Run(() =>
+                {
+                    _refStore.EnsureBuilt(
+
+                        refPercent =>
+                        {
+                            loadingWindow.UpdateStatus(
+                                $"Reading the reference panel... " +
+                                $"{refPercent}%");
+
+                            loadingWindow.UpdateReferenceProgress(
+                                refPercent);
+                        },
+
+                        dbPercent =>
+                        {
+                            loadingWindow.UpdateStatus(
+                                dbPercent < 100
+                                    ? $"Building the SQLite reference database... " +
+                                      $"{dbPercent}%"
+                                    : "Reference database build complete.");
+
+                            loadingWindow.UpdateDbProgress(
+                                dbPercent);
+                        });
+                });
+
+
+                // =====================================================
+                // DATABASE BUILD COMPLETED
+                // =====================================================
+
+                loadingWindow.UpdateStatus(
+                    "Loading the Class II reference information...");
+
+                loadingWindow.UpdateReferenceProgress(100);
+
+                loadingWindow.UpdateDbProgress(100);
+
+
+                // Now that the SQLite database exists, construct
+                // the DRB345 / Class II null-reference information.
+
+                _dataCleaning.NullDrb345Reference =
+                    _refStore.BuildClassIINullReference();
+
+
+                _referenceInitializationComplete = true;
+
+                ImputeStatusText.Text =
+                    "Reference database ready.";
+
+
+                // Leave the completed progress window visible very
+                // briefly so the user can see that it reached 100%.
+
+                await Task.Delay(350);
+            }
+            catch (Exception ex)
+            {
+                _referenceInitializationComplete = false;
+
+                MessageBox.Show(
+                    "The HLA reference database could not be initialized."
+                    + "\n\nDatabase build error:"
+                    + "\n" + ex.Message
+                    + "\n\nInner error:"
+                    + "\n" +
+                    (ex.InnerException?.Message ?? "(none)"),
+                    "Reference Database Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+
+                ImputeStatusText.Text =
+                    "Reference database initialization failed.";
+            }
+            finally
+            {
+                // loadingWindow is null during a normal startup
+                // with an existing/current reference database.
+
+                if (loadingWindow != null)
+                {
+                    loadingWindow.AllowClose();
+
+                    loadingWindow.Close();
+                }
+            }
+        }
+
+
 
         // ===========================================================
         // INPUT PREPROCESSING (RAW -> NORMALIZED -> OPTIONAL SERO MAP -> OPTIONAL EXPANSION)
@@ -305,7 +493,7 @@ namespace HLAImputation
                 .Select(x => new InputDisplay
                 {
                     TxID = x.TxID,
-                    Race = x.Race,
+                    Ethnicity = x.Ethnicity,
                     Type = x.PatType,
                     A1 = ConvertForDisplay(x.Loci["A"][0]),
                     A2 = ConvertForDisplay(x.Loci["A"][1]),
@@ -390,6 +578,21 @@ namespace HLAImputation
         private async void Run_Click(object sender, RoutedEventArgs e)
         {
 
+            if (!_referenceInitializationComplete)
+            {
+                MessageBox.Show(
+                    "The reference database is not ready."
+                    + "\n\nWait for the reference build to finish. "
+                    + "If the loading window has closed with an error, "
+                    + "restart the application after correcting the reported problem.",
+                    "Reference Database Not Ready",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+
+                return;
+            }
+
+
             if (_inputData == null || _inputData.Count == 0)
             {
                 MessageBox.Show("Load an input CSV first.");
@@ -429,14 +632,11 @@ namespace HLAImputation
             var baseUseLocus = GetUseLocusMap();
 
             // ✅ Build the Class II null-DRB345 reference once (cached), then reset the audit.
-            try
+            if (_dataCleaning.NullDrb345Reference == null)
             {
-                if (_dataCleaning.NullDrb345Reference == null)
-                    _dataCleaning.NullDrb345Reference = _refStore.BuildClassIINullReference();
+                _dataCleaning.NullDrb345Reference =
+                    _refStore.BuildClassIINullReference();
             }
-            catch { /* if unavailable, DRB345 corrections are simply skipped */ }
-            _dataCleaning.Drb345CorrectedTxIds.Clear();
-            _dataCleaning.Drb345CorrectionReasons.Clear();
 
 
 
@@ -461,7 +661,7 @@ namespace HLAImputation
                     token.ThrowIfCancellationRequested();
 
                     // Compute per-sample iterative (or non-iterative) result
-                    var (res, transformedInput, usedMap, failureReason, raceStrategyUsed) =
+                    var (res, transformedInput, usedMap, failureReason, ethnicityStrategyUsed) =
     ImputeOneWithOptionalIterativeFallback(rawInput, resolutionMode, convertToGGroup, baseUseLocus, iterativeEnabled);
 
                     done++;
@@ -474,7 +674,7 @@ namespace HLAImputation
                     var d = new ImputedDisplay
                     {
                         TxID = rawInput.TxID, // variant ID for now; collapsed later to base
-                        Race = transformedInput.Race,
+                        Ethnicity = transformedInput.Ethnicity,
                         Type = transformedInput.PatType,
 
                         GenesUsed = genesUsed,
@@ -504,9 +704,9 @@ namespace HLAImputation
                         Mismatch = success ? res.MismatchCount : 0,
                         Selection = success ? res.FinalSelection : "FAILED",
 
-                        RaceStrategyUsed = success
-                            ? (res.RaceStrategyUsed ?? raceStrategyUsed)
-                            : (string.IsNullOrWhiteSpace(raceStrategyUsed) ? "Unknown" : raceStrategyUsed),
+                        EthnicityStrategyUsed = success
+                            ? (res.EthnicityStrategyUsed ?? ethnicityStrategyUsed)
+                            : (string.IsNullOrWhiteSpace(ethnicityStrategyUsed) ? "Unknown" : ethnicityStrategyUsed),
 
                         FailureReason = success
                             ? ""
@@ -784,7 +984,7 @@ namespace HLAImputation
     InputRecord transformedInput,
     Dictionary<string, bool> attemptUseMap,
     out string failureReason,
-    out string raceStrategyUsed)
+    out string ethnicityStrategyUsed)
         {
             lock (_engineLock)
             {
@@ -792,7 +992,7 @@ namespace HLAImputation
                 try
                 {
                     _engine.UseLocus = new Dictionary<string, bool>(attemptUseMap, StringComparer.OrdinalIgnoreCase);
-                    return _engine.ProcessSingle(transformedInput, out failureReason, out raceStrategyUsed);
+                    return _engine.ProcessSingle(transformedInput, out failureReason, out ethnicityStrategyUsed);
                 }
                 finally
                 {
@@ -806,7 +1006,7 @@ namespace HLAImputation
          InputRecord TransformedInput,
          Dictionary<string, bool> UsedMap,
          string FailureReason,
-         string RaceStrategyUsed)
+         string EthnicityStrategyUsed)
     ImputeOneWithOptionalIterativeFallback(
         InputRecord rawInput,
         string resolutionMode,
@@ -818,20 +1018,20 @@ namespace HLAImputation
             InputRecord transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
 
             string failureReason;
-            string raceStrategyUsed;
+            string ethnicityStrategyUsed;
 
             if (!iterativeEnabled)
             {
-                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
-                return (resOnce, transformed, currentUse, failureReason, raceStrategyUsed);
+                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
+                return (resOnce, transformed, currentUse, failureReason, ethnicityStrategyUsed);
             }
 
-            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
             if (res != null)
-                return (res, transformed, currentUse, failureReason, raceStrategyUsed);
+                return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
 
             string lastFailureReason = failureReason;
-            string lastRaceStrategy = raceStrategyUsed;
+            string lastEthnicityStrategy = ethnicityStrategyUsed;
 
             var order = _engine.SearchOrder.ToList();
             const int MIN_SEARCH_ORDER_POSITIONS_TO_KEEP = 3;
@@ -845,13 +1045,13 @@ namespace HLAImputation
                     currentUse[locusToDrop] = false;
                     transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
 
-                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
 
                     lastFailureReason = failureReason;
-                    lastRaceStrategy = raceStrategyUsed;
+                    lastEthnicityStrategy = ethnicityStrategyUsed;
 
                     if (res != null)
-                        return (res, transformed, currentUse, failureReason, raceStrategyUsed);
+                        return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
                 }
             }
 
@@ -859,7 +1059,7 @@ namespace HLAImputation
                 (string.IsNullOrWhiteSpace(lastFailureReason) ? "Imputation failed." : lastFailureReason)
                 + " Iterative fallback removed loci down to the top 3 search-order positions without success.";
 
-            return (null, transformed, currentUse, summary, lastRaceStrategy);
+            return (null, transformed, currentUse, summary, lastEthnicityStrategy);
         }
 
         // Snapshot settings used for the run (written into Export "Run Settings" tab)
@@ -1172,7 +1372,7 @@ namespace HLAImputation
             var rawTable = _rawInputData.Select(r => new
             {
                 r.TxID,
-                r.Race,
+                r.Ethnicity,
                 r.PatType,
                 A1 = r.Loci.ContainsKey("A") ? r.Loci["A"][0] : "",
                 A2 = r.Loci.ContainsKey("A") ? r.Loci["A"][1] : "",

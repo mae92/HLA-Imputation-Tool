@@ -1,0 +1,21 @@
+* [33m4a4b326[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32maddress_reviewer_comments[m[33m)[m Address reviewer comments
+* [33me714117[m[33m ([m[1;31morigin/version-2[m[33m, [m[1;32mversion-2[m[33m)[m Version 2 updates
+*   [33md44a0c0[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m Merge pull request #8 from mae92/RevertedEthnicityHandlingBack
+[32m|[m[33m\[m  
+[32m|[m *   [33m46f1566[m Merge pull request #5 from mae92/main
+[32m|[m [34m|[m[35m\[m  
+* [34m|[m [35m\[m   [33md563d3d[m Merge pull request #7 from mae92/EditEthnicityHandling
+[35m|[m[1;31m\[m [34m\[m [35m\[m  
+[35m|[m [1;31m|[m[35m_[m[34m|[m[35m/[m  
+[35m|[m[35m/[m[1;31m|[m [34m|[m   
+[35m|[m * [34m|[m   [33m6b4ada9[m Merge pull request #6 from mae92/main
+[35m|[m [1;32m|[m[35m\[m [34m\[m  
+[35m|[m [1;32m|[m[35m/[m [34m/[m  
+[35m|[m[35m/[m[1;32m|[m [34m|[m   
+* [1;32m|[m [34m|[m   [33mc16700d[m Merge pull request #4 from mae92/RevertedEthnicityHandlingBack
+[1;34m|[m[34m\[m [1;32m\[m [34m\[m  
+[1;34m|[m [34m|[m [1;32m|[m[34m/[m  
+[1;34m|[m [34m|[m[34m/[m[1;32m|[m   
+[1;34m|[m * [1;32m|[m [33m6ab8f3c[m final changes I forgot to commit eariler
+[1;34m|[m * [1;32m|[m [33m81e25fe[m g-group ref replaced, more drb345 fixes applied to match input to reference better
+[1;34m|[m * [1;32m|[m [33mc61de27[m drb345 homozygous drb1 1/8/10 fix applied

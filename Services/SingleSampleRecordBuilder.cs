@@ -9,7 +9,7 @@ namespace HLAImputation.Services
     {
         public InputRecord Build(
             string sampleId,
-            string race,
+            string ethnicity,
             string patientType,
             Dictionary<string, string[]> enteredLoci,
             string[] drb3,
@@ -22,7 +22,7 @@ namespace HLAImputation.Services
                     ? $"SINGLE_{DateTime.Now:yyyyMMdd_HHmmss}"
                     : sampleId.Trim(),
 
-                Race = race?.Trim().ToUpperInvariant() ?? "",
+                Ethnicity = ethnicity?.Trim().ToUpperInvariant() ?? "",
                 PatType = patientType?.Trim() ?? "",
 
                 Loci = new Dictionary<string, string[]>(

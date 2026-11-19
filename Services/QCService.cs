@@ -287,7 +287,7 @@ namespace HLAImputation.Services
                 var copy = new InputRecord
                 {
                     TxID = raw.TxID,
-                    Race = raw.Race,
+                    Ethnicity = raw.Ethnicity,
                     PatType = raw.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };
@@ -433,7 +433,7 @@ namespace HLAImputation.Services
                 var baseCopy = new InputRecord
                 {
                     TxID = qcKey,
-                    Race = baseRec.Race,
+                    Ethnicity = baseRec.Ethnicity,
                     PatType = baseRec.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };

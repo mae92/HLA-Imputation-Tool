@@ -7,7 +7,7 @@ namespace HLAImputation.Models
     public sealed class ParsedHlaTyping
     {
         public string SampleId { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string PatientType { get; set; } = "";
 
         public Dictionary<string, List<string>> AllelesByLocus { get; set; } =

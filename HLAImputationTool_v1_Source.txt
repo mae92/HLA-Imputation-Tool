@@ -811,7 +811,7 @@ namespace HLAImputation
                 .Select(x => new InputDisplay
                 {
                     TxID = x.TxID,
-                    Race = x.Race,
+                    Ethnicity = x.Ethnicity,
                     Type = x.PatType,
                     A1 = ConvertForDisplay(x.Loci["A"][0]),
                     A2 = ConvertForDisplay(x.Loci["A"][1]),
@@ -967,7 +967,7 @@ namespace HLAImputation
                     token.ThrowIfCancellationRequested();
 
                     // Compute per-sample iterative (or non-iterative) result
-                    var (res, transformedInput, usedMap, failureReason, raceStrategyUsed) =
+                    var (res, transformedInput, usedMap, failureReason, ethnicityStrategyUsed) =
     ImputeOneWithOptionalIterativeFallback(rawInput, resolutionMode, convertToGGroup, baseUseLocus, iterativeEnabled);
 
                     done++;
@@ -980,7 +980,7 @@ namespace HLAImputation
                     var d = new ImputedDisplay
                     {
                         TxID = rawInput.TxID, // variant ID for now; collapsed later to base
-                        Race = transformedInput.Race,
+                        Ethnicity = transformedInput.Ethnicity,
                         Type = transformedInput.PatType,
 
                         GenesUsed = genesUsed,
@@ -1010,9 +1010,9 @@ namespace HLAImputation
                         Mismatch = success ? res.MismatchCount : 0,
                         Selection = success ? res.FinalSelection : "FAILED",
 
-                        RaceStrategyUsed = success
-                            ? (res.RaceStrategyUsed ?? raceStrategyUsed)
-                            : (string.IsNullOrWhiteSpace(raceStrategyUsed) ? "Unknown" : raceStrategyUsed),
+                        EthnicityStrategyUsed = success
+                            ? (res.EthnicityStrategyUsed ?? ethnicityStrategyUsed)
+                            : (string.IsNullOrWhiteSpace(ethnicityStrategyUsed) ? "Unknown" : ethnicityStrategyUsed),
 
                         FailureReason = success
                             ? ""
@@ -1290,7 +1290,7 @@ namespace HLAImputation
     InputRecord transformedInput,
     Dictionary<string, bool> attemptUseMap,
     out string failureReason,
-    out string raceStrategyUsed)
+    out string ethnicityStrategyUsed)
         {
             lock (_engineLock)
             {
@@ -1298,7 +1298,7 @@ namespace HLAImputation
                 try
                 {
                     _engine.UseLocus = new Dictionary<string, bool>(attemptUseMap, StringComparer.OrdinalIgnoreCase);
-                    return _engine.ProcessSingle(transformedInput, out failureReason, out raceStrategyUsed);
+                    return _engine.ProcessSingle(transformedInput, out failureReason, out ethnicityStrategyUsed);
                 }
                 finally
                 {
@@ -1312,7 +1312,7 @@ namespace HLAImputation
          InputRecord TransformedInput,
          Dictionary<string, bool> UsedMap,
          string FailureReason,
-         string RaceStrategyUsed)
+         string EthnicityStrategyUsed)
     ImputeOneWithOptionalIterativeFallback(
         InputRecord rawInput,
         string resolutionMode,
@@ -1324,20 +1324,20 @@ namespace HLAImputation
             InputRecord transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
 
             string failureReason;
-            string raceStrategyUsed;
+            string ethnicityStrategyUsed;
 
             if (!iterativeEnabled)
             {
-                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
-                return (resOnce, transformed, currentUse, failureReason, raceStrategyUsed);
+                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
+                return (resOnce, transformed, currentUse, failureReason, ethnicityStrategyUsed);
             }
 
-            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
             if (res != null)
-                return (res, transformed, currentUse, failureReason, raceStrategyUsed);
+                return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
 
             string lastFailureReason = failureReason;
-            string lastRaceStrategy = raceStrategyUsed;
+            string lastEthnicityStrategy = ethnicityStrategyUsed;
 
             var order = _engine.SearchOrder.ToList();
             const int MIN_SEARCH_ORDER_POSITIONS_TO_KEEP = 3;
@@ -1351,13 +1351,13 @@ namespace HLAImputation
                     currentUse[locusToDrop] = false;
                     transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
 
-                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out raceStrategyUsed);
+                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
 
                     lastFailureReason = failureReason;
-                    lastRaceStrategy = raceStrategyUsed;
+                    lastEthnicityStrategy = ethnicityStrategyUsed;
 
                     if (res != null)
-                        return (res, transformed, currentUse, failureReason, raceStrategyUsed);
+                        return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
                 }
             }
 
@@ -1365,7 +1365,7 @@ namespace HLAImputation
                 (string.IsNullOrWhiteSpace(lastFailureReason) ? "Imputation failed." : lastFailureReason)
                 + " Iterative fallback removed loci down to the top 3 search-order positions without success.";
 
-            return (null, transformed, currentUse, summary, lastRaceStrategy);
+            return (null, transformed, currentUse, summary, lastEthnicityStrategy);
         }
 
         // Snapshot settings used for the run (written into Export "Run Settings" tab)
@@ -1678,7 +1678,7 @@ namespace HLAImputation
             var rawTable = _rawInputData.Select(r => new
             {
                 r.TxID,
-                r.Race,
+                r.Ethnicity,
                 r.PatType,
                 A1 = r.Loci.ContainsKey("A") ? r.Loci["A"][0] : "",
                 A2 = r.Loci.ContainsKey("A") ? r.Loci["A"][1] : "",
@@ -1851,7 +1851,7 @@ namespace HLAImputation.Models
     public class ImputedDisplay
     {
         public string TxID { get; set; }
-        public string Race { get; set; }
+        public string Ethnicity { get; set; }
         public string Type { get; set; }
 
         // ✅ NEW: Which loci were used as input for this sample (always populated)
@@ -1882,7 +1882,7 @@ namespace HLAImputation.Models
         public int Mismatch { get; set; }
         public string Selection { get; set; }
 
-        public string RaceStrategyUsed { get; set; } = "";
+        public string EthnicityStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
         // ✅ existing
@@ -1910,7 +1910,7 @@ namespace HLAImputation.Models
     public class InputDisplay
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string Type { get; set; } = "";
 
         public string A1 { get; set; } = "";
@@ -1960,7 +1960,7 @@ namespace HLAImputation.Models
     public sealed class InputRecord
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string PatType { get; set; } = "";
 
         // Locus -> [allele1, allele2]
@@ -1972,8 +1972,8 @@ namespace HLAImputation.Models
 
     public sealed class Haplotype
     {
-        public string RaceUsed { get; set; } = "";  // the column used (e.g., CAU, FiveRaceAverage)
-        public double Frequency { get; set; }       // frequency in RaceUsed
+        public string EthnicityUsed { get; set; } = "";  // the column used (e.g., CAU, FiveEthnicityAverage)
+        public double Frequency { get; set; }       // frequency in EthnicityUsed
 
         // locus -> allele
         public Dictionary<string, string> Alleles { get; set; } = new Dictionary<string, string>();
@@ -1982,7 +1982,7 @@ namespace HLAImputation.Models
     public sealed class DiplotypeResult
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string PatType { get; set; } = "";
 
         public Haplotype H1 { get; set; } = new Haplotype();
@@ -1995,7 +1995,7 @@ namespace HLAImputation.Models
         public int NumberInputAlleles { get; set; }
         public int MismatchCount { get; set; }
 
-        public string RaceStrategyUsed { get; set; } = "";
+        public string EthnicityStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
         public bool IsSingleHaplotypeImputation { get; set; }
@@ -3679,7 +3679,7 @@ namespace HLAImputation.Services
             var copy = new InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -4291,7 +4291,7 @@ string allele, string locusHint, List<string> notes, string slotLabel)
                 var r = new InputRecord
                 {
                     TxID = finalTx,
-                    Race = Get(parts, "Race").ToUpperInvariant(),
+                    Ethnicity = Get(parts, "Ethnicity").ToUpperInvariant(),
                     PatType = Get(parts, "PatType"),
                 };
 
@@ -4472,7 +4472,7 @@ namespace HLAImputation.Services
             var copy = new InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -4755,52 +4755,52 @@ namespace HLAImputation.Services
             "A","B","DRB1","DQB1","C","DQA1","DRB345","DPB1","DPA1"
         };
 
-        public string IfNoRaceListedUse { get; set; } = "FiveRaceAverage";
-        public string IfNoHapsForRaceUse { get; set; } = "HighestOfAnyRace";
+        public string IfNoEthnicityListedUse { get; set; } = "FiveEthnicityAverage";
+        public string IfNoHapsForEthnicityUse { get; set; } = "HighestOfAnyEthnicity";
 
         public ImputationEngine(ReferenceStore store)
         {
             _store = store ?? throw new ArgumentNullException(nameof(store));
         }
 
-        // Race Handling Strategy:
-            // Race provided: CAU → FiveRaceAverage → HighestOfAnyRace ✅
-            // No race: FiveRaceAverage → HighestOfAnyRace ✅
+        // Ethnicity Handling Strategy:
+            // Ethnicity provided: CAU → FiveEthnicityAverage → HighestOfAnyEthnicity ✅
+            // No ethnicity: FiveEthnicityAverage → HighestOfAnyEthnicity ✅
 
         public DiplotypeResult? ProcessSingle(
     InputRecord input,
     out string failureReason,
-    out string raceStrategyUsed)
+    out string ethnicityStrategyUsed)
         {
             failureReason = "";
-            raceStrategyUsed = "";
+            ethnicityStrategyUsed = "";
 
             var transformed = TransformInputForImputation(input);
-            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+            bool hasEthnicity = !string.IsNullOrWhiteSpace(input.Ethnicity);
 
             // Build the ordered strategy chain
-            // Race provided:  RACE -> FiveRaceAverage -> HighestOfAnyRace
-            // No race:        FiveRaceAverage -> HighestOfAnyRace
+            // Ethnicity provided:  ETHNICITY -> FiveEthnicityAverage -> HighestOfAnyEthnicity
+            // No ethnicity:        FiveEthnicityAverage -> HighestOfAnyEthnicity
             var attempts = new List<(string Column, string Label)>();
 
-            if (hasRace)
+            if (hasEthnicity)
             {
-                string raceCol = input.Race.Trim().ToUpperInvariant();
-                attempts.Add((raceCol, "Race-specific (" + raceCol + ")"));
-                attempts.Add(("FiveRaceAverage", "Five-race average (fallback after race)"));
-                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+                string ethnicityCol = input.Ethnicity.Trim().ToUpperInvariant();
+                attempts.Add((ethnicityCol, "Ethnicity-specific (" + ethnicityCol + ")"));
+                attempts.Add(("FiveEthnicityAverage", "Five-ethnicity average (fallback after ethnicity)"));
+                attempts.Add(("HighestOfAnyEthnicity", "Highest of any ethnicity (fallback after five-ethnicity average)"));
             }
             else
             {
-                attempts.Add(("FiveRaceAverage", "Five-race average (no race listed)"));
-                attempts.Add(("HighestOfAnyRace", "Highest of any race (fallback after five-race average)"));
+                attempts.Add(("FiveEthnicityAverage", "Five-ethnicity average (no ethnicity listed)"));
+                attempts.Add(("HighestOfAnyEthnicity", "Highest of any ethnicity (fallback after five-ethnicity average)"));
             }
 
             string lastFailureReason = "Imputation failed.";
 
             foreach (var attempt in attempts)
             {
-                raceStrategyUsed = attempt.Label;
+                ethnicityStrategyUsed = attempt.Label;
 
                 var candidates = _store.QueryTopHaplotypesForColumn(
                     transformed,
@@ -4830,7 +4830,7 @@ namespace HLAImputation.Services
                         singleHaplotypeCandidate
                             ? "single haplotype homozygous imputation"
                             : "highest frequency";
-                    best.RaceStrategyUsed = raceStrategyUsed;
+                    best.EthnicityStrategyUsed = ethnicityStrategyUsed;
                     best.FailureReason = "";
                     best.IsSingleHaplotypeImputation = singleHaplotypeCandidate;
                     return best;
@@ -4853,7 +4853,7 @@ namespace HLAImputation.Services
             var copy = new InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -4966,7 +4966,7 @@ namespace HLAImputation.Services
             return new DiplotypeResult
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 H1 = bestH1,
                 H2 = bestH2,
@@ -5384,7 +5384,7 @@ namespace HLAImputation.Services
                 var copy = new InputRecord
                 {
                     TxID = raw.TxID,
-                    Race = raw.Race,
+                    Ethnicity = raw.Ethnicity,
                     PatType = raw.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };
@@ -5530,7 +5530,7 @@ namespace HLAImputation.Services
                 var baseCopy = new InputRecord
                 {
                     TxID = qcKey,
-                    Race = baseRec.Race,
+                    Ethnicity = baseRec.Ethnicity,
                     PatType = baseRec.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };
@@ -5812,7 +5812,7 @@ namespace HLAImputation.Services
         private readonly string _csvPath;
         private readonly string _dbPath;
 
-        private static readonly string[] FiveRaceCols = { "AFA", "API", "CAU", "HIS", "NAM" };
+        private static readonly string[] FiveEthnicityCols = { "AFA", "API", "CAU", "HIS", "NAM" };
         private static readonly string[] AlleleCols = { "a", "c", "b", "drb345", "drb1", "dqa1", "dqb1", "dpa1", "dpb1" };
 
         private static readonly Dictionary<string, string> ColToLocus = new(StringComparer.OrdinalIgnoreCase)
@@ -5977,7 +5977,7 @@ namespace HLAImputation.Services
                     throw new Exception($"Reference CSV missing required allele column '{ac}'");
 
             int lastAllele = colIndex["dpb1"];
-            var raceCols = header.Skip(lastAllele + 1).Select(h => h.Trim()).Where(h => h.Length > 0).ToList();
+            var ethnicityCols = header.Skip(lastAllele + 1).Select(h => h.Trim()).Where(h => h.Length > 0).ToList();
 
             // Pooling=False prevents pooled native handles from keeping the .tmp locked
             var connString = $"Data Source={targetDbPath};Pooling=False;";
@@ -5997,9 +5997,9 @@ PRAGMA temp_store = MEMORY;";
 
             var allCols = new List<string>();
             allCols.AddRange(AlleleCols);
-            allCols.Add("HighestOfAnyRace");
-            allCols.Add("FiveRaceAverage");
-            allCols.AddRange(raceCols);
+            allCols.Add("HighestOfAnyEthnicity");
+            allCols.Add("FiveEthnicityAverage");
+            allCols.AddRange(ethnicityCols);
 
             string createCols =
                 string.Join(",\n", allCols.Select(c =>
@@ -6059,7 +6059,7 @@ PRAGMA temp_store = MEMORY;";
                     insert.Parameters["@" + ac].Value = parts[colIndex[ac]].Trim();
 
                 var freqs = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-                foreach (var rc in raceCols)
+                foreach (var rc in ethnicityCols)
                 {
                     double f = ParseDoubleSafe(parts[colIndex[rc]]);
                     freqs[rc] = f;
@@ -6067,11 +6067,11 @@ PRAGMA temp_store = MEMORY;";
                 }
 
                 double highest = freqs.Count == 0 ? 0.0 : freqs.Values.Max();
-                insert.Parameters["@HighestOfAnyRace"].Value = highest;
+                insert.Parameters["@HighestOfAnyEthnicity"].Value = highest;
 
                 double sum5 = 0.0;
                 int n5 = 0;
-                foreach (var r5 in FiveRaceCols)
+                foreach (var r5 in FiveEthnicityCols)
                 {
                     if (freqs.ContainsKey(r5))
                     {
@@ -6080,7 +6080,7 @@ PRAGMA temp_store = MEMORY;";
                     }
                 }
                 double avg5 = n5 == 0 ? 0.0 : (sum5 / n5);
-                insert.Parameters["@FiveRaceAverage"].Value = avg5;
+                insert.Parameters["@FiveEthnicityAverage"].Value = avg5;
 
                 insert.ExecuteNonQuery();
             }
@@ -6120,24 +6120,24 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
     List<string> orderedLoci,
     Dictionary<string, bool> useLocus,
     int topN,
-    string ifNoRaceUse,
+    string ifNoEthnicityUse,
     string ifNoHapsUse,
-    out string raceSourceUsed)
+    out string ethnicitySourceUsed)
         {
-            bool hasRace = !string.IsNullOrWhiteSpace(input.Race);
+            bool hasEthnicity = !string.IsNullOrWhiteSpace(input.Ethnicity);
 
-            // Primary column: race column if provided, else FiveRaceAverage (via ifNoRaceUse)
-            string primaryCol = hasRace
-                ? input.Race.Trim().ToUpperInvariant()
-                : ifNoRaceUse;
+            // Primary column: ethnicity column if provided, else FiveEthnicityAverage (via ifNoEthnicityUse)
+            string primaryCol = hasEthnicity
+                ? input.Ethnicity.Trim().ToUpperInvariant()
+                : ifNoEthnicityUse;
 
             var haps = QueryStepwiseInternal(input, orderedLoci, useLocus, topN, primaryCol);
 
             if (haps.Count > 0)
             {
-                raceSourceUsed = hasRace
-                    ? "Race-specific (" + primaryCol + ")"
-                    : "Five-race average (no race listed)";
+                ethnicitySourceUsed = hasEthnicity
+                    ? "Ethnicity-specific (" + primaryCol + ")"
+                    : "Five-ethnicity average (no ethnicity listed)";
                 return haps;
             }
 
@@ -6148,20 +6148,20 @@ CREATE INDEX idx_dpb1 ON Haplotypes(dpb1);";
 
                 if (fallback.Count > 0)
                 {
-                    raceSourceUsed = hasRace
-                        ? "Highest of any race (no haplotypes for listed race)"
-                        : "Highest of any race (no haplotypes for five-race average)";
+                    ethnicitySourceUsed = hasEthnicity
+                        ? "Highest of any ethnicity (no haplotypes for listed ethnicity)"
+                        : "Highest of any ethnicity (no haplotypes for five-ethnicity average)";
                     return fallback;
                 }
             }
 
-            raceSourceUsed = "No haplotypes found (any strategy)";
+            ethnicitySourceUsed = "No haplotypes found (any strategy)";
             return haps;
         }
 
 
-        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyRace").
-        // Used by the engine to retry when diplotype selection fails on the race-specific set.
+        // Query candidate haplotypes using an explicit frequency column (e.g., "HighestOfAnyEthnicity").
+        // Used by the engine to retry when diplotype selection fails on the ethnicity-specific set.
         public List<Haplotype> QueryTopHaplotypesForColumn(
             InputRecord input,
             List<string> orderedLoci,
@@ -6321,7 +6321,7 @@ LIMIT @topN;
 
                 list.Add(new Haplotype
                 {
-                    RaceUsed = freqCol,
+                    EthnicityUsed = freqCol,
                     Frequency = freq,
                     Alleles = alleles
                 });
@@ -6619,7 +6619,7 @@ namespace HLAImputation.Services
             var copy = new Models.InputRecord
             {
                 TxID = input.TxID,
-                Race = input.Race,
+                Ethnicity = input.Ethnicity,
                 PatType = input.PatType,
                 Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             };
@@ -6718,7 +6718,7 @@ namespace HLAImputation.Services
                 var rec = new Models.InputRecord
                 {
                     TxID = $"{normalizedInput.TxID}.{k + 1}",
-                    Race = normalizedInput.Race,
+                    Ethnicity = normalizedInput.Ethnicity,
                     PatType = normalizedInput.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };
@@ -6748,7 +6748,7 @@ namespace HLAImputation.Services
                 var rec = new Models.InputRecord
                 {
                     TxID = $"{normalizedInput.TxID}.1",
-                    Race = normalizedInput.Race,
+                    Ethnicity = normalizedInput.Ethnicity,
                     PatType = normalizedInput.PatType,
                     Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
                 };

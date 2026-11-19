@@ -209,7 +209,7 @@ string allele, string locusHint, List<string> notes, string slotLabel)
                 var r = new InputRecord
                 {
                     TxID = finalTx,
-                    Race = Get(parts, "Race").ToUpperInvariant(),
+                    Ethnicity = Get(parts, "Ethnicity").ToUpperInvariant(),
                     PatType = Get(parts, "PatType"),
                 };
 

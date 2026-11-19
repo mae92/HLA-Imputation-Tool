@@ -7,7 +7,7 @@ namespace HLAImputation.Models
     public class ImputedDisplay
     {
         public string TxID { get; set; }
-        public string Race { get; set; }
+        public string Ethnicity { get; set; }
         public string Type { get; set; }
 
         // ✅ NEW: Which loci were used as input for this sample (always populated)
@@ -38,7 +38,7 @@ namespace HLAImputation.Models
         public int Mismatch { get; set; }
         public string Selection { get; set; }
 
-        public string RaceStrategyUsed { get; set; } = "";
+        public string EthnicityStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
         // ✅ existing

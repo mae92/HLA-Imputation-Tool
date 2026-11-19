@@ -1,5 +1,8 @@
 .vs/
 bin/
 obj/
+*.exe
+*.pdb
+*.user
 Reference/A-C-B-DRB-DQ-DP_Haplotypes_Dataframe.csv
 Reference

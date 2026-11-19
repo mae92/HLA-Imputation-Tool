@@ -4,7 +4,7 @@ namespace HLAImputation.Models
     public class InputDisplay
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string Type { get; set; } = "";
 
         public string A1 { get; set; } = "";

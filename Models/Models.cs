@@ -6,7 +6,7 @@ namespace HLAImputation.Models
     public sealed class InputRecord
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string PatType { get; set; } = "";
 
         // Locus -> [allele1, allele2]
@@ -18,8 +18,8 @@ namespace HLAImputation.Models
 
     public sealed class Haplotype
     {
-        public string RaceUsed { get; set; } = "";  // the column used (e.g., CAU, FiveRaceAverage)
-        public double Frequency { get; set; }       // frequency in RaceUsed
+        public string EthnicityUsed { get; set; } = "";  // the column used (e.g., CAU, FiveEthnicityAverage)
+        public double Frequency { get; set; }       // frequency in EthnicityUsed
 
         // locus -> allele
         public Dictionary<string, string> Alleles { get; set; } = new Dictionary<string, string>();
@@ -28,7 +28,7 @@ namespace HLAImputation.Models
     public sealed class DiplotypeResult
     {
         public string TxID { get; set; } = "";
-        public string Race { get; set; } = "";
+        public string Ethnicity { get; set; } = "";
         public string PatType { get; set; } = "";
 
         public Haplotype H1 { get; set; } = new Haplotype();
@@ -41,7 +41,7 @@ namespace HLAImputation.Models
         public int NumberInputAlleles { get; set; }
         public int MismatchCount { get; set; }
 
-        public string RaceStrategyUsed { get; set; } = "";
+        public string EthnicityStrategyUsed { get; set; } = "";
         public string FailureReason { get; set; } = "";
 
         public bool IsSingleHaplotypeImputation { get; set; }

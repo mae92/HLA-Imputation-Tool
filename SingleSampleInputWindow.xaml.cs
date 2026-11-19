@@ -28,7 +28,7 @@ namespace HLAImputation
         {
             InitializeComponent();
 
-            RaceComboBox.ItemsSource = new[]
+            EthnicityComboBox.ItemsSource = new[]
             {
                 "",
                 "AFA",
@@ -258,8 +258,8 @@ namespace HLAImputation
             if (!string.IsNullOrWhiteSpace(parsed.SampleId))
                 SampleIdTextBox.Text = parsed.SampleId;
 
-            if (!string.IsNullOrWhiteSpace(parsed.Race))
-                RaceComboBox.Text = parsed.Race;
+            if (!string.IsNullOrWhiteSpace(parsed.Ethnicity))
+                EthnicityComboBox.Text = parsed.Ethnicity;
 
             if (!string.IsNullOrWhiteSpace(parsed.PatientType))
                 PatientTypeTextBox.Text = parsed.PatientType;
@@ -320,8 +320,8 @@ namespace HLAImputation
             // Clear patient/sample metadata.
             SampleIdTextBox.Clear();
 
-            RaceComboBox.SelectedIndex = -1;
-            RaceComboBox.Text = "";
+            EthnicityComboBox.SelectedIndex = -1;
+            EthnicityComboBox.Text = "";
 
             PatientTypeTextBox.Clear();
 
@@ -394,7 +394,7 @@ namespace HLAImputation
 
                 ResultRecord = _recordBuilder.Build(
                     SampleIdTextBox.Text,
-                    RaceComboBox.Text,
+                    EthnicityComboBox.Text,
                     PatientTypeTextBox.Text,
                     loci,
                     new[]

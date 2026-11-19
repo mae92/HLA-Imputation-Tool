@@ -54,13 +54,13 @@ Population-category labels select frequency panels and are not genetically infer
 Use the distributed CSV template. For the principal validated configuration, provide one-field molecular values for:
 
 ```text
-TxID	Race	PatType	a1	a2	b1	b2	c1	c2	drb1	drb2	drb31	drb32	drb41	drb42	drb51	drb52	dqa1	dqa2	dqb1	dqb2	dpa1	dpa2	dpb1	dpb2
+TxID	Ethnicity	PatType	a1	a2	b1	b2	c1	c2	drb1	drb2	drb31	drb32	drb41	drb42	drb51	drb52	dqa1	dqa2	dqb1	dqb2	dpa1	dpa2	dpb1	dpb2
 ```
 
 Example:
 
 ```text
-TxID	Race	PatType	a1	a2	b1	b2	c1	c2	drb1	drb2	drb31	drb32	drb41	drb42	drb51	drb52	dqa1	dqa2	dqb1	dqb2	dpa1	dpa2	dpb1	dpb2
+TxID	Ethnicity	PatType	a1	a2	b1	b2	c1	c2	drb1	drb2	drb31	drb32	drb41	drb42	drb51	drb52	dqa1	dqa2	dqb1	dqb2	dpa1	dpa2	dpb1	dpb2
 1	    CAU	  Kidney	3	      3201	B44:02	B*44:02	                DRB1*01:01	DRB1*07:01	DRB4*01:01P		            DQB1*02:02	DQB1*05:01	DQA1*01:01	DQA1*02	    DPB1*04:01P	DPB1*10:01P	DPA1*01:03	DPA1*02:01
 2	    API		        A*24:02	26	  15:07	  B*46	  C*01:02	C*03:03	14:03	      15	        DRB3*0101	    DRB5*01:01		
 ```
