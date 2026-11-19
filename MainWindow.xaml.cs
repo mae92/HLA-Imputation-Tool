@@ -155,6 +155,44 @@ namespace HLAImputation
         // ===========================================================
         // INPUT PREPROCESSING (RAW -> NORMALIZED -> OPTIONAL SERO MAP -> OPTIONAL EXPANSION)
         // ===========================================================
+
+        // single sample
+        private void SingleSample_Click(object sender, RoutedEventArgs e)
+        {
+            var window = new SingleSampleInputWindow
+            {
+                Owner = this
+            };
+
+            bool? accepted = window.ShowDialog();
+
+            if (accepted != true || window.ResultRecord == null)
+                return;
+
+            LoadSingleSample(window.ResultRecord);
+        }
+
+        private void LoadSingleSample(InputRecord record)
+        {
+            _rawInputData = new List<InputRecord>
+    {
+        record
+    };
+
+            _allResults.Clear();
+            _lastTransformedInputs.Clear();
+            _lastRunSettings.Clear();
+
+            RebuildEffectiveInput();
+
+            ImputeStatusText.Text =
+                $"Loaded single sample: {record.TxID}";
+
+            ImputeProgressBar.Value = 0;
+            ImputePercentText.Text = "0%";
+        }
+
+        // batch
         private void RebuildEffectiveInput()
         {
             if (_rawInputData == null) return;

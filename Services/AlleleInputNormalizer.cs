@@ -29,8 +29,22 @@ namespace HLAImputation.Services
                 TxID = input.TxID,
                 Race = input.Race,
                 PatType = input.PatType,
-                Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+
+                CleaningNotes = input.CleaningNotes != null
+                    ? new List<string>(input.CleaningNotes)
+                    : new List<string>(),
+
+                Loci = new Dictionary<string, string[]>(
+                    StringComparer.OrdinalIgnoreCase)
             };
+
+            //var copy = new InputRecord
+            //{
+            //    TxID = input.TxID,
+            //    Race = input.Race,
+            //    PatType = input.PatType,
+            //    Loci = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            //};
 
             foreach (var kv in input.Loci)
             {
