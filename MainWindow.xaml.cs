@@ -40,6 +40,22 @@ namespace HLAImputation
 
         private ObservableCollection<ImputedDisplay> _allResults = new();
 
+        // Reviewer-requested detailed result collections.
+        //
+        // These are populated only after serological variants have
+        // been collapsed to the winning variant for each base TxID.
+        private readonly List<TopDiplotypeExportRow>
+            _topDiplotypeRows = new();
+
+        private readonly List<PhasedAlternativeResult>
+            _unphasedRows = new();
+
+
+        // Reverse molecular-to-antigen converter used for the
+        // reviewer-requested antigen-association accuracy metrics.
+        private AntigenAssociationService?
+            _antigenService;
+
         // mismatch maps keyed by "TxID|PropertyName"
         private readonly Dictionary<string, bool> _inputMismatchMap = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, bool> _resultMismatchMap = new(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +73,7 @@ namespace HLAImputation
         // for reference db rebuild progress
         private bool _referenceInitializationStarted;
         private bool _referenceInitializationComplete;
+
 
         public MainWindow()
         {
@@ -98,6 +115,12 @@ namespace HLAImputation
             _seroService = System.IO.File.Exists(serologyMapPath)
                 ? new SerologyToOneFieldMolService(serologyMapPath)
                 : null;
+
+            _antigenService =
+                System.IO.File.Exists(serologyMapPath)
+                    ? new AntigenAssociationService(
+                    serologyMapPath)
+        : null;
 
             string dbPath = System.IO.Path.Combine(
                 baseDir,
@@ -612,16 +635,31 @@ namespace HLAImputation
             Dispatcher.Invoke(() =>
             {
                 _allResults.Clear();
-                ResultGrid.ItemsSource = _allResults;
 
-                ImputeStatusText.Text = "Imputing...";
-                ImputeProgressBar.Value = 0;
-                ImputePercentText.Text = "0%";
+                _topDiplotypeRows.Clear();
+                _unphasedRows.Clear();
+
+                ResultGrid.ItemsSource =
+                    _allResults;
+
+                ImputeStatusText.Text =
+                    "Imputing...";
+
+                ImputeProgressBar.Value =
+                    0;
+
+                ImputePercentText.Text =
+                    "0%";
             });
 
             var worklist = _imputationWorklist ?? _inputData;
 
-            var candidates = new List<(string BaseTx, InputRecord TransformedInput, ImputedDisplay Display)>();
+            var candidates =
+                new List<(
+                    string BaseTx,
+                    InputRecord TransformedInput,
+                    ImputedDisplay Display,
+                    ImputationCandidateSet Set)>();
 
             int total = worklist.Count;
             int done = 0;
@@ -661,12 +699,44 @@ namespace HLAImputation
                     token.ThrowIfCancellationRequested();
 
                     // Compute per-sample iterative (or non-iterative) result
-                    var (res, transformedInput, usedMap, failureReason, ethnicityStrategyUsed) =
-    ImputeOneWithOptionalIterativeFallback(rawInput, resolutionMode, convertToGGroup, baseUseLocus, iterativeEnabled);
+                    var (
+                        set,
+                        transformedInput,
+                        usedMap,
+                        failureReason,
+                        ethnicityStrategyUsed)
+                    =
+                    ImputeOneWithOptionalIterativeFallback(
+                        rawInput,
+                        resolutionMode,
+                        convertToGGroup,
+                        baseUseLocus,
+                        iterativeEnabled);
+
+
+                    var res =
+                        set.Best;
+
 
                     done++;
-                    bool success = res != null;
-                    if (success) found++;
+
+
+                    bool success =
+                        res != null;
+
+
+                    if (success)
+                    {
+                        found++;
+                    }
+
+                    var antigen =
+                        success &&
+                        _antigenService != null
+                            ? _antigenService.Calculate(
+                                transformedInput,
+                                res!)
+                            : new AntigenAccuracyResult();
 
                     string baseTx = _variantToBaseTx.TryGetValue(rawInput.TxID, out var b) ? b : rawInput.TxID;
                     string genesUsed = BuildGenesUsedString(usedMap);
@@ -698,10 +768,83 @@ namespace HLAImputation
                         DPA11 = success ? res.H1.Alleles["DPA1"] : "",
                         DPA12 = success ? res.H2.Alleles["DPA1"] : "",
 
-                        FreqH1 = success ? res.FreqH1 : 0,
-                        FreqH2 = success ? res.FreqH2 : 0,
-                        FreqDip = success ? res.FreqDip : 0,
-                        Mismatch = success ? res.MismatchCount : 0,
+                        FreqH1 =
+                            success
+                                ? res!.FreqH1
+                                : 0,
+
+
+                        FreqH2 =
+                            success
+                                ? res!.FreqH2
+                                : 0,
+
+
+                        FreqDip =
+                            success
+                                ? res!.FreqDip
+                                : 0,
+
+
+                        // Sum of the frequencies of the retained Top 15
+                        // diplotypes from the winning ethnicity tier.
+                        Top15FrequencySum =
+                            success
+                                ? set.Top15FrequencySum
+                                : 0,
+
+
+                        // Rank-1 frequency divided by the sum of the
+                        // Top-15 frequencies, multiplied by 100.
+                        TopDiplotypePercentOfTop15 =
+                            success
+                                ? set.TopDiplotypePercentOfTop15
+                                : 0,
+
+
+                        // Sum of the frequencies of all reference-supported
+                        // phase configurations for the selected genotype.
+                        UnphasedGenotypeFrequency =
+                            success
+                                ? set.UnphasedGenotypeFrequency
+                                : 0,
+
+
+                        UnphasedCompatibleDiplotypeCount =
+                            success
+                                ? set.CompatiblePhasedAlternatives.Count
+                                : 0,
+
+
+                        AntigenCorrectAllPossible =
+                            antigen.CorrectAllPossible,
+
+
+                        AntigenTotalAllPossible =
+                            antigen.TotalAllPossible,
+
+
+                        AntigenAccuracyAllPossible =
+                            antigen.AccuracyAllPossible,
+
+
+                        AntigenCorrectInputObserved =
+                            antigen.CorrectInputObserved,
+
+
+                        AntigenTotalInputObserved =
+                            antigen.TotalInputObserved,
+
+
+                        AntigenAccuracyInputObserved =
+                            antigen.AccuracyInputObserved,
+
+
+                        Mismatch =
+                            success
+                                ? res!.MismatchCount
+                                : 0,
+
                         Selection = success ? res.FinalSelection : "FAILED",
 
                         EthnicityStrategyUsed = success
@@ -717,7 +860,13 @@ namespace HLAImputation
                         Success = success
                     };
 
-                    candidates.Add((baseTx, transformedInput, d));
+                    candidates.Add(
+                        (
+                            baseTx,
+                            transformedInput,
+                            d,
+                            set
+                           ));
 
                     // ✅ Stream into UI buffer
                     uiBuffer.Add(d);
@@ -770,18 +919,140 @@ namespace HLAImputation
             _allResults.Clear();
             var chosenTransformedByBase = new Dictionary<string, InputRecord>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var grp in candidates.GroupBy(c => c.BaseTx, StringComparer.OrdinalIgnoreCase))
+            foreach (
+    var group in candidates.GroupBy(
+        candidate => candidate.BaseTx,
+        StringComparer.OrdinalIgnoreCase))
             {
-                var best = grp
-                    .OrderByDescending(x => x.Display.Success)
-                    .ThenByDescending(x => x.Display.FreqDip)
-                    .First();
+                // Prefer a successful variant.
+                //
+                // If several variants succeeded, retain the variant
+                // having the highest selected diplotype frequency.
+                var best =
+                    group
+                        .OrderByDescending(
+                            candidate =>
+                                candidate.Display.Success)
+                        .ThenByDescending(
+                            candidate =>
+                                candidate.Display.FreqDip)
+                        .First();
 
-                // Set collapsed TxID to base
-                best.Display.TxID = grp.Key;
 
-                _allResults.Add(best.Display);
-                chosenTransformedByBase[grp.Key] = best.TransformedInput;
+                // Collapse the displayed TxID from a variant identifier,
+                // such as Tx123.4, back to the base sample identifier.
+                best.Display.TxID =
+                    group.Key;
+
+
+                _allResults.Add(
+                    best.Display);
+
+
+                chosenTransformedByBase[group.Key] =
+                    best.TransformedInput;
+
+
+                // Failed samples have no Top-15 or phase rows.
+                if (!best.Display.Success ||
+                    best.Set.Best == null)
+                {
+                    continue;
+                }
+
+
+                // =====================================================
+                // TOP 15 ROWS
+                // =====================================================
+                int rank =
+                    1;
+
+
+                foreach (
+                    var diplotype in best.Set.Top15)
+                {
+                    _topDiplotypeRows.Add(
+                        new TopDiplotypeExportRow
+                        {
+                            TxID =
+                                group.Key,
+
+                            Ethnicity =
+                                best.TransformedInput.Ethnicity,
+
+                            Rank =
+                                rank++,
+
+                            Haplotype1 =
+                                ImputationEngine.HaplotypeText(
+                                    diplotype.H1.Alleles,
+                                    _engine.SearchOrder),
+
+                            Haplotype2 =
+                                ImputationEngine.HaplotypeText(
+                                    diplotype.H2.Alleles,
+                                    _engine.SearchOrder),
+
+                            Haplotype1Frequency =
+                                diplotype.FreqH1,
+
+                            Haplotype2Frequency =
+                                diplotype.FreqH2,
+
+                            DiplotypeFrequency =
+                                diplotype.FreqDip,
+
+                            TopDiplotypePercentOfTop15 =
+                                best.Set
+                                    .TopDiplotypePercentOfTop15,
+
+                            MismatchCount =
+                                diplotype.MismatchCount,
+
+                            EthnicityStrategyUsed =
+                                best.Display
+                                    .EthnicityStrategyUsed
+                        });
+                }
+
+
+                // =====================================================
+                // UNPHASED-GENOTYPE PHASE ALTERNATIVES
+                // =====================================================
+                foreach (
+                    var phase in
+                        best.Set.CompatiblePhasedAlternatives)
+                {
+                    // Do not mutate the object retained by CandidateSet.
+                    // Create an export copy with the collapsed base TxID.
+                    _unphasedRows.Add(
+                        new PhasedAlternativeResult
+                        {
+                            TxID =
+                                group.Key,
+
+                            UnphasedGenotype =
+                                phase.UnphasedGenotype,
+
+                            Haplotype1 =
+                                phase.Haplotype1,
+
+                            Haplotype2 =
+                                phase.Haplotype2,
+
+                            Haplotype1Frequency =
+                                phase.Haplotype1Frequency,
+
+                            Haplotype2Frequency =
+                                phase.Haplotype2Frequency,
+
+                            DiplotypeFrequency =
+                                phase.DiplotypeFrequency,
+
+                            IsSelectedDiplotype =
+                                phase.IsSelectedDiplotype
+                        });
+                }
             }
 
             // align transformed inputs to base list for QC (kept as you had it)
@@ -812,6 +1083,17 @@ namespace HLAImputation
             RefreshResultGridDisplay();
             RefreshInputGridDisplay();
             UpdateMismatchMaps();
+
+            ImputeProgressBar.Value =
+                100;
+
+            ImputePercentText.Text =
+                "100%";
+
+            ImputeStatusText.Text =
+                $"Imputation complete. " +
+                $"{_allResults.Count(x => x.Success)} of " +
+                $"{_allResults.Count} samples succeeded.";
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -978,88 +1260,232 @@ namespace HLAImputation
             return string.Join(",", used);
         }
 
-        // Run ProcessSingle with a temporary UseLocus override.
-        // This is necessary because ImputationEngine uses its internal UseLocus during stepwise filtering.
-        private DiplotypeResult? ProcessSingleWithUseLocusOverride(
-    InputRecord transformedInput,
-    Dictionary<string, bool> attemptUseMap,
-    out string failureReason,
-    out string ethnicityStrategyUsed)
+        // Run ProcessCandidateSet with a temporary UseLocus override.
+        //
+        // This preserves the engine's per-sample iterative behavior
+        // while returning:
+        //   - rank 1
+        //   - Top 15
+        //   - compatible phased alternatives
+        private ImputationCandidateSet
+            ProcessSingleWithUseLocusOverride(
+                InputRecord transformedInput,
+                Dictionary<string, bool> attemptUseMap,
+                out string failureReason,
+                out string ethnicityStrategyUsed)
         {
             lock (_engineLock)
             {
-                var saved = _engine.UseLocus;
+                var savedUseLocus =
+                    _engine.UseLocus;
+
                 try
                 {
-                    _engine.UseLocus = new Dictionary<string, bool>(attemptUseMap, StringComparer.OrdinalIgnoreCase);
-                    return _engine.ProcessSingle(transformedInput, out failureReason, out ethnicityStrategyUsed);
+                    _engine.UseLocus =
+                        new Dictionary<string, bool>(
+                            attemptUseMap,
+                            StringComparer.OrdinalIgnoreCase);
+
+
+                    return _engine.ProcessCandidateSet(
+                        transformedInput,
+                        out failureReason,
+                        out ethnicityStrategyUsed);
                 }
                 finally
                 {
-                    _engine.UseLocus = saved;
+                    _engine.UseLocus =
+                        savedUseLocus;
                 }
             }
         }
 
-        // One sample: either run once (non-iterative) or iteratively drop loci from the END of SearchOrder until success.
-        private (DiplotypeResult? Result,
-         InputRecord TransformedInput,
-         Dictionary<string, bool> UsedMap,
-         string FailureReason,
-         string EthnicityStrategyUsed)
-    ImputeOneWithOptionalIterativeFallback(
-        InputRecord rawInput,
-        string resolutionMode,
-        bool convertToGGroup,
-        Dictionary<string, bool> baseUseLocus,
-        bool iterativeEnabled)
+        // One sample:
+        //
+        // If iterative mode is off, run once.
+        //
+        // If iterative mode is on, progressively remove loci from
+        // the end of SearchOrder until imputation succeeds or only
+        // the first three search-order positions remain.
+        private (
+            ImputationCandidateSet Set,
+            InputRecord TransformedInput,
+            Dictionary<string, bool> UsedMap,
+            string FailureReason,
+            string EthnicityStrategyUsed)
+        ImputeOneWithOptionalIterativeFallback(
+            InputRecord rawInput,
+            string resolutionMode,
+            bool convertToGGroup,
+            Dictionary<string, bool> baseUseLocus,
+            bool iterativeEnabled)
         {
-            var currentUse = BuildPerSampleUseLocusMap(rawInput, baseUseLocus);
-            InputRecord transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
+            var currentUse =
+                BuildPerSampleUseLocusMap(
+                    rawInput,
+                    baseUseLocus);
+
+
+            InputRecord transformed =
+                _dataCleaning.TransformRecord(
+                    rawInput,
+                    resolutionMode,
+                    convertToGGroup,
+                    currentUse);
+
 
             string failureReason;
             string ethnicityStrategyUsed;
 
+
+            // =====================================================
+            // NON-ITERATIVE MODE
+            // =====================================================
             if (!iterativeEnabled)
             {
-                var resOnce = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
-                return (resOnce, transformed, currentUse, failureReason, ethnicityStrategyUsed);
+                var setOnce =
+                    ProcessSingleWithUseLocusOverride(
+                        transformed,
+                        currentUse,
+                        out failureReason,
+                        out ethnicityStrategyUsed);
+
+
+                return (
+                    setOnce,
+                    transformed,
+                    new Dictionary<string, bool>(
+                        currentUse,
+                        StringComparer.OrdinalIgnoreCase),
+                    failureReason,
+                    ethnicityStrategyUsed);
             }
 
-            var res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
-            if (res != null)
-                return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
 
-            string lastFailureReason = failureReason;
-            string lastEthnicityStrategy = ethnicityStrategyUsed;
+            // =====================================================
+            // ITERATIVE MODE: INITIAL ATTEMPT
+            // =====================================================
+            var set =
+                ProcessSingleWithUseLocusOverride(
+                    transformed,
+                    currentUse,
+                    out failureReason,
+                    out ethnicityStrategyUsed);
 
-            var order = _engine.SearchOrder.ToList();
-            const int MIN_SEARCH_ORDER_POSITIONS_TO_KEEP = 3;
 
-            for (int idx = order.Count - 1; idx >= MIN_SEARCH_ORDER_POSITIONS_TO_KEEP; idx--)
+            if (set.Best != null)
             {
-                string locusToDrop = order[idx];
+                return (
+                    set,
+                    transformed,
+                    new Dictionary<string, bool>(
+                        currentUse,
+                        StringComparer.OrdinalIgnoreCase),
+                    failureReason,
+                    ethnicityStrategyUsed);
+            }
 
-                if (currentUse.TryGetValue(locusToDrop, out bool on) && on)
+
+            string lastFailureReason =
+                failureReason;
+
+            string lastEthnicityStrategy =
+                ethnicityStrategyUsed;
+
+
+            var order =
+                _engine.SearchOrder.ToList();
+
+
+            // Preserve the existing branch behavior:
+            // never remove the first three positions in SearchOrder.
+            const int MIN_SEARCH_ORDER_POSITIONS_TO_KEEP =
+                3;
+
+
+            for (
+                int index = order.Count - 1;
+                index >= MIN_SEARCH_ORDER_POSITIONS_TO_KEEP;
+                index--)
+            {
+                string locusToDrop =
+                    order[index];
+
+
+                if (!currentUse.TryGetValue(
+                        locusToDrop,
+                        out bool currentlyEnabled)
+                    ||
+                    !currentlyEnabled)
                 {
-                    currentUse[locusToDrop] = false;
-                    transformed = _dataCleaning.TransformRecord(rawInput, resolutionMode, convertToGGroup, currentUse);
+                    continue;
+                }
 
-                    res = ProcessSingleWithUseLocusOverride(transformed, currentUse, out failureReason, out ethnicityStrategyUsed);
 
-                    lastFailureReason = failureReason;
-                    lastEthnicityStrategy = ethnicityStrategyUsed;
+                // Disable this locus for the next attempt.
+                currentUse[locusToDrop] =
+                    false;
 
-                    if (res != null)
-                        return (res, transformed, currentUse, failureReason, ethnicityStrategyUsed);
+
+                // Re-transform the original record using the revised
+                // per-sample locus map.
+                transformed =
+                    _dataCleaning.TransformRecord(
+                        rawInput,
+                        resolutionMode,
+                        convertToGGroup,
+                        currentUse);
+
+
+                set =
+                    ProcessSingleWithUseLocusOverride(
+                        transformed,
+                        currentUse,
+                        out failureReason,
+                        out ethnicityStrategyUsed);
+
+
+                lastFailureReason =
+                    failureReason;
+
+                lastEthnicityStrategy =
+                    ethnicityStrategyUsed;
+
+
+                if (set.Best != null)
+                {
+                    return (
+                        set,
+                        transformed,
+                        new Dictionary<string, bool>(
+                            currentUse,
+                            StringComparer.OrdinalIgnoreCase),
+                        failureReason,
+                        ethnicityStrategyUsed);
                 }
             }
 
-            string summary =
-                (string.IsNullOrWhiteSpace(lastFailureReason) ? "Imputation failed." : lastFailureReason)
-                + " Iterative fallback removed loci down to the top 3 search-order positions without success.";
 
-            return (null, transformed, currentUse, summary, lastEthnicityStrategy);
+            string summary =
+                (
+                    string.IsNullOrWhiteSpace(
+                        lastFailureReason)
+                        ? "Imputation failed."
+                        : lastFailureReason
+                )
+                +
+                " Iterative fallback removed loci down to " +
+                "the top 3 search-order positions without success.";
+
+
+            return (
+                new ImputationCandidateSet(),
+                transformed,
+                new Dictionary<string, bool>(
+                    currentUse,
+                    StringComparer.OrdinalIgnoreCase),
+                summary,
+                lastEthnicityStrategy);
         }
 
         // Snapshot settings used for the run (written into Export "Run Settings" tab)
@@ -1516,6 +1942,90 @@ namespace HLAImputation
                 $"Samples with ≥1 cleaning action: {_allResults.Count(x => !string.IsNullOrWhiteSpace(x.CleaningSummary))}";
             wsAudit.Column(1).AdjustToContents();
             wsAudit.Column(2).Width = 90;
+
+
+            // ===========================================================
+            // Sheet 8: Top 15 Diplotypes
+            // ===========================================================
+
+            var wsTop =
+                wb.Worksheets.Add(
+                    "Top 15 Diplotypes");
+
+
+            if (_topDiplotypeRows.Count > 0)
+            {
+                wsTop
+                    .Cell(1, 1)
+                    .InsertTable(
+                        _topDiplotypeRows);
+            }
+            else
+            {
+                wsTop.Cell(1, 1).Value =
+                    "No successful imputation results were available.";
+            }
+
+
+            wsTop.Columns().AdjustToContents();
+
+
+            // ===========================================================
+            // Sheet 9: Unphased Genotypes
+            // ===========================================================
+
+            var wsUnphased =
+                wb.Worksheets.Add(
+                    "Unphased Genotypes");
+
+
+            if (_unphasedRows.Count > 0)
+            {
+                wsUnphased
+                    .Cell(1, 1)
+                    .InsertTable(
+                        _unphasedRows);
+            }
+            else
+            {
+                wsUnphased.Cell(1, 1).Value =
+                    "No compatible phased alternatives were available.";
+            }
+
+
+            wsUnphased.Columns().AdjustToContents();
+
+
+            // ===========================================================
+            // FINAL WORKSHEET ORDER
+            // ===========================================================
+            //
+            // Desired order:
+            // 6, 5, 1, 2, 3, 4, 7, 8, 9
+            //
+            // Run Settings
+            // QC Report
+            // Raw Input
+            // Transformed Input
+            // Imputed Output
+            // Mismatch Review
+            // Cleaning Audit
+            // Top 15 Diplotypes
+            // Unphased Genotypes
+
+            wb.Worksheet("Run Settings").Position = 1;
+            wb.Worksheet("QC Report").Position = 2;
+            wb.Worksheet("Raw Input").Position = 3;
+            wb.Worksheet("Transformed Input").Position = 4;
+            wb.Worksheet("Imputed Output").Position = 5;
+            wb.Worksheet("Mismatch Review").Position = 6;
+            wb.Worksheet("Cleaning Audit").Position = 7;
+            wb.Worksheet("Top 15 Diplotypes").Position = 8;
+            wb.Worksheet("Unphased Genotypes").Position = 9;
+
+
+            // Save workbook
+            wb.SaveAs(dlg.FileName);
 
             // ===========================================================
             // SAVE

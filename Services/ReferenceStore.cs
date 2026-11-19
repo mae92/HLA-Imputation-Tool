@@ -555,7 +555,7 @@ LIMIT @topN;
 
                 list.Add(new Haplotype
                 {
-                    EthnicityUsed = freqCol,
+                    EthnicityFrequencyColumnUsed = freqCol,
                     Frequency = freq,
                     Alleles = alleles
                 });
@@ -563,6 +563,49 @@ LIMIT @topN;
 
             return list;
         }
+
+
+        public double GetExactHaplotypeFrequency(
+    IReadOnlyDictionary<string, string> alleles,
+    IEnumerable<string> loci,
+    string frequencyColumn)
+        {
+            var allowedFrequencyColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "AFA", "API", "CAU", "HIS", "NAM",
+        "FiveEthnicityAverage", "HighestOfAnyEthnicity"
+    };
+            if (!allowedFrequencyColumns.Contains(frequencyColumn))
+                throw new ArgumentException("Unsupported frequency column.", nameof(frequencyColumn));
+
+            var locusToCol = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        { "A", "a" }, { "B", "b" }, { "C", "c" }, { "DRB1", "drb1" },
+        { "DRB345", "drb345" }, { "DQA1", "dqa1" }, { "DQB1", "dqb1" },
+        { "DPA1", "dpa1" }, { "DPB1", "dpb1" }
+    };
+            var where = new List<string>();
+            using var conn = new SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            int p = 0;
+            foreach (string locus in loci)
+            {
+                if (!locusToCol.TryGetValue(locus, out string? col)) continue;
+                if (!alleles.TryGetValue(locus, out string? allele)) continue;
+                string pn = "@a" + p++;
+                where.Add($"[{col}] = {pn}");
+                cmd.Parameters.Add(new SqliteParameter(pn, allele));
+            }
+            if (where.Count == 0) return 0.0;
+            cmd.CommandText = $"SELECT MAX([{frequencyColumn}]) FROM Haplotypes WHERE {string.Join(" AND ", where)};";
+            object? value = cmd.ExecuteScalar();
+            return value == null || value == DBNull.Value
+                ? 0.0
+                : Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+
+
 
 
         private static void SafeDelete(string path)

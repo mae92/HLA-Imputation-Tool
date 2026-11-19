@@ -1,4 +1,5 @@
-﻿
+﻿using System;
+
 namespace HLAImputation.Models
 {
     public class InputDisplay
