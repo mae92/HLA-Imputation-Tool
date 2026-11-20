@@ -2019,9 +2019,9 @@ namespace HLAImputation
             wb.Worksheet("Transformed Input").Position = 4;
             wb.Worksheet("Imputed Output").Position = 5;
             wb.Worksheet("Mismatch Review").Position = 6;
-            wb.Worksheet("Cleaning Audit").Position = 7;
-            wb.Worksheet("Top 15 Diplotypes").Position = 8;
-            wb.Worksheet("Unphased Genotypes").Position = 9;
+            wb.Worksheet("Top 15 Diplotypes").Position = 7;
+            wb.Worksheet("Unphased Genotypes").Position = 8;
+            wb.Worksheet("Cleaning Audit").Position = 9;
 
 
             // Save workbook

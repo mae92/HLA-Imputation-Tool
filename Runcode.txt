@@ -1,1 +1,1 @@
-.\export_all_wpf_code_to_text.ps1 -ProjectPath "C:\Users\ellisoniima\source\repos\HLA-Imputation-Tool-v2" -OutputFile "HLAImputationTool_v1_Source.txt"
+.\export_all_wpf_code_to_text.ps1 -ProjectPath "C:\Users\ellisoniima\source\repos\HLA-Imputation-Tool-v2" -OutputFile "HLAImputationTool_v3_Source.txt"
